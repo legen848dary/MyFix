@@ -13,22 +13,31 @@ A new session should read this file first, then continue from the **Immediate ne
   - `TheFixClient`
   - `TheFixSimulator`
 - `TheFixSimulator` has been imported from `LLExSimulator` into this monorepo.
-- `TheFixClient` has been upgraded from a placeholder console app into a runnable web workstation shell.
-- Existing simulator Docker + terminal demo FIX client workflow has been adapted to work from this monorepo.
+- `TheFixClient` has been upgraded from a placeholder console app into a live simulator-linked FIX workstation.
+- Existing simulator Docker + terminal demo FIX client workflow has been adapted to work from this monorepo, with the terminal demo client now opt-in for combined startup helpers.
 - Once all verification commands below are green, it is safe to commit and push the checkpoint.
 
 ## Latest verified green state
 
 Verified on: 2026-03-21
 
-- Root build green via `./gradlew --no-daemon clean build`
-- Direct simulator run green via `./gradlew --no-daemon :TheFixSimulator:run` + `curl http://localhost:8080/api/health`
-- Direct client run green via `./gradlew --no-daemon :TheFixClient:run` + health/overview/connect/preview API checks on port `8081`
-- Docker simulator workflow green via:
+- Root build + packaging green via `./gradlew --no-daemon clean build :TheFixSimulator:shadowJar -x :TheFixSimulator:test`
+- `TheFixClient` test suite green via `./gradlew --no-daemon :TheFixClient:test`
+- Direct client run green via `./gradlew --no-daemon :TheFixClient:run` plus:
+  - `GET /api/health`
+  - `GET /api/overview`
+  - `POST /api/session/connect`
+  - `POST /api/order-ticket/preview`
+  - `POST /api/order-ticket/send`
+  - `POST /api/order-flow/start`
+  - `POST /api/order-flow/stop`
+  - `POST /api/session/disconnect`
+  - shutdown verification that stopping the web client also drops the FIX session
+- Simulator Docker workflow green via:
   - `./scripts/local_llexsim.sh build`
-  - `./scripts/local_llexsim.sh start`
-  - `./scripts/local_fix_demo_client.sh start 50`
-  - simulator API showing `fixSessions=1` with a logged-on `FIX.4.4` session
+  - `./scripts/local_clean_and_run.sh` (starts simulator only by default)
+  - `./scripts/local_fix_demo_client.sh start 50` (explicit opt-in)
+  - simulator API showing a logged-on `FIX.4.4` session
 
 ### Important fix landed during verification
 
@@ -92,6 +101,33 @@ Key files:
 - `TheFixClient/src/main/resources/web/index.html`
 - `TheFixClient/src/main/resources/web/app.js`
 
+### Checkpoint 4 — TheFixClient live FIX workstation
+Status: Completed
+
+What was done:
+- Reused the simulator demo-client FIX session settings inside `TheFixClient`
+- Added a real QuickFIX/J initiator service for connect/disconnect/send/auto-flow
+- Wired the server API to live FIX-backed actions for:
+  - session connect/disconnect
+  - pulse test
+  - order preview
+  - manual order send
+  - order-flow start/stop
+- Surfaced real session status, recent events, and recent orders in the browser
+- Added a live integration test covering logon and real order routing to the simulator
+- Updated server shutdown so the FIX service closes cleanly with the web server
+- Changed combined simulator startup helpers so the terminal demo FIX client is no longer started by default
+
+Key files:
+- `TheFixClient/src/main/java/com/insoftu/thefix/client/TheFixClientConfig.java`
+- `TheFixClient/src/main/java/com/insoftu/thefix/client/TheFixClientFixService.java`
+- `TheFixClient/src/main/java/com/insoftu/thefix/client/TheFixClientServer.java`
+- `TheFixClient/src/main/java/com/insoftu/thefix/client/TheFixClientWorkbenchState.java`
+- `TheFixClient/src/main/resources/web/app.js`
+- `TheFixClient/src/test/java/com/insoftu/thefix/client/TheFixClientLiveIntegrationTest.java`
+- `TheFixSimulator/scripts/local_clean_and_run.sh`
+- `TheFixSimulator/scripts/local_rebuild_and_run.sh`
+
 ## Verified behavior to preserve
 
 ### TheFixSimulator
@@ -104,11 +140,14 @@ Key files:
 - Health endpoint: `http://localhost:8081/api/health`
 - Overview endpoint: `http://localhost:8081/api/overview`
 - Web UI: `http://localhost:8081`
-- Shell endpoints:
+- Live endpoints:
   - `POST /api/session/connect`
   - `POST /api/session/disconnect`
   - `POST /api/session/pulse-test`
   - `POST /api/order-ticket/preview`
+  - `POST /api/order-ticket/send`
+  - `POST /api/order-flow/start`
+  - `POST /api/order-flow/stop`
 
 ## Important implementation notes
 
@@ -122,26 +161,24 @@ Key files:
 - Vert.x HTTP server
 - Vue 3 SPA served from `src/main/resources/web`
 - WebSocket broadcaster
-- Dockerized simulator + demo client workflow
+- Dockerized simulator workflow with opt-in terminal demo FIX client
 
 ### TheFixClient architecture summary
 - Java 21
 - Vert.x backend
 - static web assets under `TheFixClient/src/main/resources/web`
-- current UI is a trader workstation shell, not yet wired to a real QuickFIX/J initiator flow
+- QuickFIX/J initiator service reusing simulator demo-client session settings
+- browser-driven manual send and start/stop order-flow controls backed by real FIX logic
 
 ## Pending tasks
 
 ### High priority
-- Wire `TheFixClient` backend to the real FIX demo-client behavior
-- Reuse/adapt the existing QuickFIX/J demo client flow from `TheFixSimulator`
-- Make the `Prime session` action establish a real FIX session
-- Make the order ticket send actual FIX orders
-- Surface real session/order/log state in the browser
+- Add Docker/container support for `TheFixClient`
+- Extend local deployment so the default local stack can bring up both web apps together
+- Keep the terminal demo FIX client available only as an explicit opt-in workflow
 
 ### Next integration milestone
-- Add Docker/container support for `TheFixClient`
-- Extend local deployment so all 3 components run together:
+- Extend local deployment so all 3 components can run together when explicitly requested:
   - `TheFixClient`
   - `TheFixSimulator`
   - terminal demo FIX client
@@ -181,7 +218,11 @@ curl -sf http://localhost:8080/api/health
 ```bash
 cd "/Users/debjyotisarkar/IdeaProjects/MyFix/TheFixSimulator"
 ./scripts/local_llexsim.sh build
-./scripts/local_llexsim.sh start
+./scripts/local_clean_and_run.sh
+curl -sf http://localhost:8080/api/health
+curl -sf http://localhost:8080/api/sessions
+
+# optional terminal demo FIX client
 ./scripts/local_fix_demo_client.sh start 50
 curl -sf http://localhost:8080/api/health
 curl -sf http://localhost:8080/api/sessions
@@ -205,22 +246,17 @@ User requested:
 
 ## Immediate next tasks
 
-1. Re-run all completed-checkpoint validations:
-   - root build
-   - `TheFixClient` run/health/actions
-   - simulator Docker workflow
-2. If all green:
-   - `git add` the current checkpoint files
-   - `git commit`
-   - `git push origin main`
-3. Then begin the next checkpoint:
-   - wire `TheFixClient` to the real FIX demo-client flow
+1. Containerize `TheFixClient`
+2. Add a default local deployment path for the two web apps:
+   - `TheFixClient`
+   - `TheFixSimulator`
+3. Keep the terminal demo FIX client available as an explicit opt-in workflow only
 
 ## If a new chat session resumes from here
 
 Suggested prompt:
 
 ```text
-Read PROGRESS.md and resume from the Immediate next tasks section. Re-verify all completed checkpoints, commit/push if green, then continue wiring TheFixClient to the real FIX demo-client flow.
+Read PROGRESS.md and resume from the Immediate next tasks section. Verify the latest green state if needed, then continue with TheFixClient containerization and the default two-web-app local deployment path.
 ```
 

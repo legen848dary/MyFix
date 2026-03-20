@@ -657,12 +657,14 @@ The same start/stop scripts work both:
 
 No localhost or droplet hostname argument is needed in the normal Docker workflow because the client connects to the simulator using the internal Compose service name `llexsimulator`.
 
-Local helpers also honor `FIX_DEMO_RATE` when no explicit positional rate is passed:
+Local helpers also honor `FIX_DEMO_RATE` when the demo client is explicitly enabled.
+The combined clean/run and rebuild/run helpers now start the simulator only by default,
+and launch the terminal demo client only when you opt in:
 
 ```bash
 FIX_DEMO_RATE=500 ./scripts/fix_demo_client_start.sh
-FIX_DEMO_RATE=500 ./scripts/local_clean_and_run.sh
-FIX_DEMO_RATE=500 ./scripts/local_rebuild_and_run.sh
+FIX_DEMO_RATE=500 ./scripts/local_clean_and_run.sh --with-demo-client
+FIX_DEMO_RATE=500 ./scripts/local_rebuild_and_run.sh --with-demo-client
 ```
 
 Run it in the foreground if you want to see connection and progress messages live:

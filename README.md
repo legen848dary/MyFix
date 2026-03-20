@@ -4,8 +4,8 @@
 
 ## Modules
 
-- `TheFixClient` — trader-facing web workstation shell for the future FIX client, currently served on `http://localhost:8081`.
-- `TheFixSimulator` — imported simulator platform with its own web UI on `http://localhost:8080`, FIX acceptor on `tcp://localhost:9880`, and existing Docker/demo-client tooling.
+- `TheFixClient` — trader-facing web workstation with a live QuickFIX/J initiator flow, served on `http://localhost:8081`.
+- `TheFixSimulator` — imported simulator platform with its own web UI on `http://localhost:8080`, FIX acceptor on `tcp://localhost:9880`, and Docker/demo-client tooling.
 
 ## Project layout
 
@@ -36,6 +36,13 @@
 - `TheFixClient` UI: `http://localhost:8081`
 - `TheFixSimulator` UI: `http://localhost:8080`
 
+`TheFixClient` can now:
+
+- establish a live FIX session to the simulator
+- preview and route manual orders
+- start and stop demo-rate order flow from the browser
+- shut down the FIX service cleanly when the web server exits
+
 ## Run tests
 
 ```bash
@@ -46,11 +53,11 @@
 
 ## Next step
 
-The next implementation checkpoint is to wire `TheFixClient` to the real FIX demo-client flow used by `TheFixSimulator`, then containerize `TheFixClient` so all three components can run together locally:
+The next implementation checkpoint is to containerize `TheFixClient` so the default local stack can bring up both web applications together while keeping the terminal demo FIX client opt-in:
 
 - `TheFixClient` web workstation
 - `TheFixSimulator`
-- terminal demo FIX client
+- terminal demo FIX client (on demand)
 
 For continuity across chat sessions, see `PROGRESS.md`.
 

@@ -1,4 +1,4 @@
-import { createApp, computed, onMounted, reactive, ref } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js'
+import { createApp, computed, onMounted, onUnmounted, reactive, ref } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js'
 
 const EVENT_LEVEL_CLASSES = {
   SUCCESS: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20',
@@ -22,7 +22,11 @@ createApp({
           <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
             <div class="rounded-full border px-3 py-1.5 text-xs font-medium"
                  :class="session.connected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' : 'border-amber-500/30 bg-amber-500/10 text-amber-200'">
-              {{ session.connected ? 'Session primed' : 'Standby mode' }}
+              {{ session.connected ? 'FIX session live' : 'Standby mode' }}
+            </div>
+            <div class="rounded-full border px-3 py-1.5 text-xs font-medium"
+                 :class="session.autoFlowActive ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100' : 'border-white/10 bg-white/5 text-slate-300'">
+              {{ session.autoFlowActive ? ('Demo flow ' + session.autoFlowRate + '/s') : 'Demo flow idle' }}
             </div>
             <div class="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-100">
               {{ overview.environment }}
@@ -40,22 +44,22 @@ createApp({
           <article class="rounded-2xl border border-white/10 bg-dark-900 p-4">
             <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Ready state</p>
             <p class="mt-3 text-2xl font-semibold text-white">{{ kpis.readyState }}</p>
-            <p class="mt-2 text-xs text-slate-400">Current workstation mode for this checkpoint.</p>
+            <p class="mt-2 text-xs text-slate-400">Current workstation mode for the live FIX checkpoint.</p>
           </article>
           <article class="rounded-2xl border border-white/10 bg-dark-900 p-4">
-            <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Pulse checks</p>
-            <p class="mt-3 text-2xl font-semibold text-cyan-300">{{ kpis.pulseChecks }}</p>
-            <p class="mt-2 text-xs text-slate-400">Operator responsiveness checks executed through the shell API.</p>
+            <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Orders sent</p>
+            <p class="mt-3 text-2xl font-semibold text-cyan-300">{{ kpis.sentOrders }}</p>
+            <p class="mt-2 text-xs text-slate-400">Outbound NewOrderSingle messages accepted by QuickFIX/J.</p>
           </article>
           <article class="rounded-2xl border border-white/10 bg-dark-900 p-4">
-            <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Open orders</p>
-            <p class="mt-3 text-2xl font-semibold text-white">{{ kpis.openOrders }}</p>
-            <p class="mt-2 text-xs text-slate-400">Illustrative desk workload for the UI rehearsal.</p>
+            <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Execution reports</p>
+            <p class="mt-3 text-2xl font-semibold text-white">{{ kpis.executionReports }}</p>
+            <p class="mt-2 text-xs text-slate-400">Simulator acknowledgements observed on the live session.</p>
           </article>
           <article class="rounded-2xl border border-white/10 bg-dark-900 p-4">
-            <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Session uptime</p>
-            <p class="mt-3 text-2xl font-semibold text-white">{{ kpis.sessionUptime }}</p>
-            <p class="mt-2 text-xs text-slate-400">Will become live FIX session uptime once connectivity is wired.</p>
+            <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Rejects / failures</p>
+            <p class="mt-3 text-2xl font-semibold text-white">{{ kpis.rejects }} / {{ kpis.sendFailures }}</p>
+            <p class="mt-2 text-xs text-slate-400">Business rejects plus local send failures from the active route.</p>
           </article>
         </section>
 
@@ -64,7 +68,7 @@ createApp({
             <div class="flex items-start justify-between gap-4">
               <div>
                 <h2 class="text-base font-semibold text-white">Session command center</h2>
-                <p class="mt-1 text-sm text-slate-400">A trader-oriented shell for simulator connectivity, with room for production controls later.</p>
+                <p class="mt-1 text-sm text-slate-400">QuickFIX/J initiator controls linked directly to the simulator acceptor.</p>
               </div>
               <span class="rounded-full px-3 py-1 text-xs font-semibold"
                     :class="session.connected ? 'bg-emerald-500/15 text-emerald-200' : 'bg-slate-700 text-slate-200'">
@@ -87,6 +91,14 @@ createApp({
               <div class="rounded-xl border border-white/10 bg-white/5 p-3">
                 <dt class="text-xs uppercase tracking-[0.18em] text-slate-500">Target</dt>
                 <dd class="mt-2 font-mono text-slate-100">{{ session.targetCompId }}</dd>
+              </div>
+              <div class="rounded-xl border border-white/10 bg-white/5 p-3">
+                <dt class="text-xs uppercase tracking-[0.18em] text-slate-500">Uptime</dt>
+                <dd class="mt-2 font-mono text-slate-100">{{ kpis.sessionUptime }}</dd>
+              </div>
+              <div class="rounded-xl border border-white/10 bg-white/5 p-3">
+                <dt class="text-xs uppercase tracking-[0.18em] text-slate-500">Open orders</dt>
+                <dd class="mt-2 font-mono text-slate-100">{{ kpis.openOrders }}</dd>
               </div>
             </dl>
             <div class="mt-5 flex flex-wrap gap-3">
@@ -120,8 +132,8 @@ createApp({
           <article class="rounded-2xl border border-white/10 bg-dark-900 p-5">
             <div class="flex items-start justify-between gap-4">
               <div>
-                <h2 class="text-base font-semibold text-white">Order ticket rehearsal</h2>
-                <p class="mt-1 text-sm text-slate-400">Preview trader intent, validation, and ticket notional before we attach live FIX routing.</p>
+                <h2 class="text-base font-semibold text-white">Order ticket</h2>
+                <p class="mt-1 text-sm text-slate-400">Preview, route, or repeat a live NewOrderSingle template through the simulator session.</p>
               </div>
               <span class="rounded-full px-3 py-1 text-xs font-semibold"
                     :class="preview.status === 'INVALID' ? 'bg-rose-500/15 text-rose-200' : 'bg-cyan-500/15 text-cyan-100'">
@@ -156,15 +168,31 @@ createApp({
                 <span class="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-500">Limit price</span>
                 <input v-model.number="orderDraft.price" type="number" min="0" step="0.01" class="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-brand-500" />
               </label>
+              <label class="col-span-2 text-sm text-slate-300">
+                <span class="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-500">Demo flow rate (msg/s)</span>
+                <input v-model.number="flowDraft.ratePerSecond" type="number" min="1" class="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-brand-500" />
+              </label>
             </div>
             <div class="mt-5 flex flex-wrap gap-3">
               <button @click="previewTicket"
                       class="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-dark-950 transition hover:bg-slate-200">
                 Preview ticket
               </button>
-              <div class="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-300">
-                Destination {{ session.targetCompId }} · {{ session.beginString }}
-              </div>
+              <button @click="sendTicket"
+                      class="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-500"
+                      :disabled="busyAction === 'send'">
+                Send live ticket
+              </button>
+              <button @click="startDemoFlow"
+                      class="rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20"
+                      :disabled="busyAction === 'flow-start'">
+                Start demo flow
+              </button>
+              <button @click="stopDemoFlow"
+                      class="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+                      :disabled="busyAction === 'flow-stop'">
+                Stop demo flow
+              </button>
             </div>
 
             <div class="mt-5 rounded-2xl border border-white/10 bg-gradient-to-br from-cyan-500/10 via-white/5 to-transparent p-4">
@@ -172,7 +200,7 @@ createApp({
                 <div>
                   <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Ticket summary</p>
                   <p class="mt-2 text-lg font-semibold text-white">{{ preview.summary || 'Generate a preview to review trader intent.' }}</p>
-                  <p class="mt-2 text-sm text-slate-300">{{ preview.recommendation || 'The preview API is live and ready for the next checkpoint wiring.' }}</p>
+                  <p class="mt-2 text-sm text-slate-300">{{ preview.recommendation || 'The preview API is live and ready for FIX routing.' }}</p>
                 </div>
                 <div class="rounded-xl border border-white/10 bg-dark-950/60 px-4 py-3 text-right">
                   <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Estimated notional</p>
@@ -184,6 +212,51 @@ createApp({
                   {{ warning }}
                 </li>
               </ul>
+            </div>
+          </article>
+
+          <article class="rounded-2xl border border-white/10 bg-dark-900 p-5">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h2 class="text-base font-semibold text-white">Recent routed orders</h2>
+                <p class="mt-1 text-sm text-slate-400">Latest manual and auto-flow orders observed by the workstation.</p>
+              </div>
+              <div class="text-xs text-slate-500">{{ recentOrders.length }} tracked</div>
+            </div>
+            <div class="mt-4 space-y-3">
+              <div v-if="!recentOrders.length" class="rounded-xl border border-dashed border-white/10 bg-white/5 px-4 py-5 text-sm text-slate-400">
+                No routed orders yet. Connect and send a ticket to populate this blotter.
+              </div>
+              <div v-for="order in recentOrders" :key="order.clOrdId" class="rounded-xl border border-white/10 bg-white/5 p-4">
+                <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                  <div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <p class="font-semibold text-white">{{ order.side }} {{ order.quantity }} {{ order.symbol }}</p>
+                      <span class="rounded-full border border-white/10 px-2 py-0.5 text-[11px] uppercase tracking-[0.15em] text-slate-300">{{ order.source }}</span>
+                    </div>
+                    <p class="mt-1 text-xs font-mono text-slate-400">{{ order.clOrdId }} · {{ order.time }}</p>
+                    <p class="mt-2 text-sm text-slate-300">{{ order.note }}</p>
+                  </div>
+                  <div class="grid grid-cols-2 gap-3 text-right text-xs text-slate-400">
+                    <div>
+                      <p>Status</p>
+                      <p class="mt-1 font-semibold text-white">{{ order.status }}</p>
+                    </div>
+                    <div>
+                      <p>Exec type</p>
+                      <p class="mt-1 font-semibold text-white">{{ order.execType }}</p>
+                    </div>
+                    <div>
+                      <p>Limit</p>
+                      <p class="mt-1 font-mono text-white">{{ order.limitPrice }}</p>
+                    </div>
+                    <div>
+                      <p>AvgPx</p>
+                      <p class="mt-1 font-mono text-white">{{ order.avgPx }}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </article>
         </section>
@@ -206,6 +279,24 @@ createApp({
               </div>
             </div>
           </article>
+
+          <article class="rounded-2xl border border-white/10 bg-dark-900 p-5">
+            <h2 class="text-base font-semibold text-white">Session snapshot</h2>
+            <dl class="mt-4 space-y-3 text-sm text-slate-300">
+              <div class="rounded-xl border border-white/10 bg-white/5 p-3">
+                <dt class="text-xs uppercase tracking-[0.18em] text-slate-500">Session mode</dt>
+                <dd class="mt-1">{{ session.mode }}</dd>
+              </div>
+              <div class="rounded-xl border border-white/10 bg-white/5 p-3">
+                <dt class="text-xs uppercase tracking-[0.18em] text-slate-500">Raw message logging</dt>
+                <dd class="mt-1">{{ session.rawMessageLoggingEnabled ? 'Enabled' : 'Suppressed' }}</dd>
+              </div>
+              <div class="rounded-xl border border-white/10 bg-white/5 p-3">
+                <dt class="text-xs uppercase tracking-[0.18em] text-slate-500">Pulse checks</dt>
+                <dd class="mt-1">{{ kpis.pulseChecks }}</dd>
+              </div>
+            </dl>
+          </article>
         </section>
 
         <section class="col-span-12">
@@ -213,12 +304,12 @@ createApp({
             <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 class="text-base font-semibold text-white">Operator event stream</h2>
-                <p class="mt-1 text-sm text-slate-400">Recent shell actions and workstation lifecycle events. This panel will evolve into the live activity stream.</p>
+                <p class="mt-1 text-sm text-slate-400">Live workstation activity including FIX logon, routing actions, and rejects.</p>
               </div>
               <div class="text-xs text-slate-500">Updated {{ generatedAtLabel }}</div>
             </div>
             <div class="mt-4 grid gap-3">
-              <div v-for="event in recentEvents" :key="event.time + event.title"
+              <div v-for="event in recentEvents" :key="event.time + event.title + event.detail"
                    class="rounded-2xl border p-4"
                    :class="eventClasses(event.level)">
                 <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -249,19 +340,30 @@ createApp({
       port: 9880,
       beginString: 'FIX.4.4',
       senderCompId: 'HSBC_TRDR01',
-      targetCompId: 'LLEXSIM'
+      targetCompId: 'LLEXSIM',
+      mode: 'QuickFIX/J initiator',
+      autoFlowActive: false,
+      autoFlowRate: 0,
+      rawMessageLoggingEnabled: false
     })
     const kpis = reactive({
       readyState: 'Loading…',
       pulseChecks: 0,
       openOrders: 0,
+      sentOrders: 0,
+      executionReports: 0,
+      rejects: 0,
+      sendFailures: 0,
       sessionUptime: '—'
     })
     const watchlist = ref([])
     const launchChecklist = ref([])
     const recentEvents = ref([])
+    const recentOrders = ref([])
     const generatedAt = ref('')
     const apiStatus = ref('Connecting…')
+    const busyAction = ref('')
+    const refreshHandle = ref(null)
 
     const orderDraft = reactive({
       symbol: 'AAPL',
@@ -269,6 +371,9 @@ createApp({
       quantity: 100,
       price: 100.25,
       timeInForce: 'DAY'
+    })
+    const flowDraft = reactive({
+      ratePerSecond: 25
     })
 
     const preview = reactive({
@@ -289,7 +394,11 @@ createApp({
       watchlist.value = payload.watchlist || []
       launchChecklist.value = payload.launchChecklist || []
       recentEvents.value = payload.recentEvents || []
+      recentOrders.value = payload.recentOrders || []
       generatedAt.value = payload.generatedAt || ''
+      if (payload.defaults?.defaultFlowRate && !flowDraft.ratePerSecond) {
+        flowDraft.ratePerSecond = payload.defaults.defaultFlowRate
+      }
       apiStatus.value = 'Live'
     }
 
@@ -314,14 +423,23 @@ createApp({
           time: 'now',
           level: 'WARN',
           title: 'Overview unavailable',
-          detail: 'The client shell API could not be reached. Confirm the backend is running.'
+          detail: 'The client API could not be reached. Confirm the backend is running.'
         }]
       }
     }
 
-    const connectSession = async () => applyOverview(await apiCall('/api/session/connect', { method: 'POST' }))
-    const disconnectSession = async () => applyOverview(await apiCall('/api/session/disconnect', { method: 'POST' }))
-    const pulseTest = async () => applyOverview(await apiCall('/api/session/pulse-test', { method: 'POST' }))
+    const runAction = async (name, work) => {
+      busyAction.value = name
+      try {
+        await work()
+      } finally {
+        busyAction.value = ''
+      }
+    }
+
+    const connectSession = async () => runAction('connect', async () => applyOverview(await apiCall('/api/session/connect', { method: 'POST' })))
+    const disconnectSession = async () => runAction('disconnect', async () => applyOverview(await apiCall('/api/session/disconnect', { method: 'POST' })))
+    const pulseTest = async () => runAction('pulse', async () => applyOverview(await apiCall('/api/session/pulse-test', { method: 'POST' })))
 
     const previewTicket = async () => {
       const payload = await apiCall('/api/order-ticket/preview', {
@@ -331,11 +449,39 @@ createApp({
       Object.assign(preview, payload)
     }
 
+    const sendTicket = async () => runAction('send', async () => {
+      await previewTicket()
+      applyOverview(await apiCall('/api/order-ticket/send', {
+        method: 'POST',
+        body: JSON.stringify(orderDraft)
+      }))
+    })
+
+    const startDemoFlow = async () => runAction('flow-start', async () => {
+      await previewTicket()
+      applyOverview(await apiCall('/api/order-flow/start', {
+        method: 'POST',
+        body: JSON.stringify({ ...orderDraft, ratePerSecond: flowDraft.ratePerSecond })
+      }))
+    })
+
+    const stopDemoFlow = async () => runAction('flow-stop', async () => applyOverview(await apiCall('/api/order-flow/stop', { method: 'POST' })))
+
     const eventClasses = (level) => EVENT_LEVEL_CLASSES[level] || EVENT_LEVEL_CLASSES.INFO
 
     onMounted(async () => {
       await loadOverview()
+      if (!flowDraft.ratePerSecond && overview.defaults?.defaultFlowRate) {
+        flowDraft.ratePerSecond = overview.defaults.defaultFlowRate
+      }
       await previewTicket()
+      refreshHandle.value = window.setInterval(loadOverview, 2000)
+    })
+
+    onUnmounted(() => {
+      if (refreshHandle.value) {
+        window.clearInterval(refreshHandle.value)
+      }
     })
 
     return {
@@ -345,15 +491,21 @@ createApp({
       watchlist,
       launchChecklist,
       recentEvents,
+      recentOrders,
       generatedAtLabel,
       apiStatus,
+      busyAction,
       orderDraft,
+      flowDraft,
       preview,
       previewWarnings,
       connectSession,
       disconnectSession,
       pulseTest,
       previewTicket,
+      sendTicket,
+      startDemoFlow,
+      stopDemoFlow,
       eventClasses
     }
   }

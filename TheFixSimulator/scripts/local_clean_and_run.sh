@@ -1,22 +1,29 @@
 #!/bin/bash
 # =============================================================================
-# local_clean_and_run.sh — Clean ledgers/state + demo client in one command
+# local_clean_and_run.sh — Clean ledgers/state + start the default local stack
 # =============================================================================
 # Usage:
+#   ./scripts/local_clean_and_run.sh
+#   ./scripts/local_clean_and_run.sh --with-demo-client [rate-per-second]
 #   ./scripts/local_clean_and_run.sh [rate-per-second]
 #
-# Rate precedence:
+# Default behavior:
+#   - starts the simulator only
+#   - leaves the terminal FIX demo client stopped unless explicitly requested
+#
+# Demo-client rate precedence (only when explicitly enabled):
 #   1. explicit positional [rate-per-second]
 #   2. FIX_DEMO_RATE environment variable
-#   3. default 100 msg/s
+#   3. default 500 msg/s
 #
 # Steps
-#   1. local_clean_ledgers.sh         — stop simulator/client and remove ledger/runtime state
-#   2. local_llexsim.sh start         — start the existing simulator image (no rebuild)
-#   3. local_fix_demo_client.sh run <rate>  — foreground demo FIX client
+#   1. local_clean_ledgers.sh              — stop services and remove ledger/runtime state
+#   2. local_llexsim.sh start              — start the existing simulator image (no rebuild)
+#   3. optional: local_fix_demo_client.sh run <rate>
 #
-# The rate argument is passed directly to local_fix_demo_client.sh run.
-# Default rate: 100 msg/s (same default as local_fix_demo_client.sh).
+# Backward compatibility:
+#   Passing a numeric positional argument still enables the demo client and uses
+#   that value as the rate, but the default no-argument path no longer starts it.
 # =============================================================================
 
 set -euo pipefail
@@ -42,36 +49,107 @@ require_script() {
     fi
 }
 
-RATE="${1:-${FIX_DEMO_RATE:-500}}"
+usage() {
+    cat << EOF
+
+${BOLD}${CYAN}Clean + Run${RESET}
+
+${BOLD}Usage:${RESET}
+  ./scripts/local_clean_and_run.sh
+  ./scripts/local_clean_and_run.sh --with-demo-client [rate-per-second]
+  ./scripts/local_clean_and_run.sh [rate-per-second]
+
+${BOLD}Default behavior:${RESET}
+  Starts the simulator only. The terminal FIX demo client is ${BOLD}opt-in${RESET}.
+
+${BOLD}Examples:${RESET}
+  ./scripts/local_clean_and_run.sh
+  ./scripts/local_clean_and_run.sh --with-demo-client
+  ./scripts/local_clean_and_run.sh --with-demo-client 50
+  ./scripts/local_clean_and_run.sh 50
+
+EOF
+}
+
+RATE="${FIX_DEMO_RATE:-500}"
+WITH_DEMO_CLIENT=false
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --with-demo-client)
+                WITH_DEMO_CLIENT=true
+                if [[ $# -gt 1 ]] && [[ "$2" =~ ^[0-9]+$ ]]; then
+                    RATE="$2"
+                    shift
+                fi
+                ;;
+            help|--help|-h)
+                usage
+                exit 0
+                ;;
+            *)
+                if [[ "$1" =~ ^[0-9]+$ ]] && [[ "$1" -gt 0 ]]; then
+                    WITH_DEMO_CLIENT=true
+                    RATE="$1"
+                else
+                    error "Unknown argument: '$1'"
+                    usage
+                    exit 1
+                fi
+                ;;
+        esac
+        shift
+    done
+}
+
+validate_rate() {
+    if ! [[ "${RATE}" =~ ^[0-9]+$ ]] || [[ "${RATE}" -le 0 ]]; then
+        error "Rate must be a positive integer (messages/sec). Got: '${RATE}'"
+        usage
+        exit 1
+    fi
+}
+
+parse_args "$@"
 
 require_script "${SCRIPTS_DIR}/local_llexsim.sh"
-require_script "${SCRIPTS_DIR}/local_fix_demo_client.sh"
 require_script "${SCRIPTS_DIR}/local_clean_ledgers.sh"
-
-# Validate rate is a positive integer
-if ! [[ "${RATE}" =~ ^[0-9]+$ ]] || [[ "${RATE}" -le 0 ]]; then
-    error "Rate must be a positive integer (messages/sec). Got: '${RATE}'"
-    echo "Usage: ./scripts/local_clean_and_run.sh [rate-per-second]"
-    exit 1
+if [[ "${WITH_DEMO_CLIENT}" == true ]]; then
+    require_script "${SCRIPTS_DIR}/local_fix_demo_client.sh"
+    validate_rate
 fi
 
-banner "Clean + Run  (rate=${RATE} msg/s)"
+if [[ "${WITH_DEMO_CLIENT}" == true ]]; then
+    banner "Clean + Run  (simulator + demo client @ ${RATE} msg/s)"
+else
+    banner "Clean + Run  (simulator only by default)"
+fi
+
+TOTAL_STEPS=2
+if [[ "${WITH_DEMO_CLIENT}" == true ]]; then
+    TOTAL_STEPS=3
+fi
 
 # ── Step 1: clean ledger/runtime state ────────────────────────────────────────
-info "Step 1/3 — stopping services and cleaning ledgers/runtime state..."
+info "Step 1/${TOTAL_STEPS} — stopping services and cleaning ledgers/runtime state..."
 "${BASH_BIN}" "${SCRIPTS_DIR}/local_clean_ledgers.sh"
 success "Ledger/runtime state cleanup completed."
 
 echo ""
 
 # ── Step 2: start existing simulator image ────────────────────────────────────
-info "Step 2/3 — starting existing simulator container image..."
+info "Step 2/${TOTAL_STEPS} — starting existing simulator container image..."
 "${BASH_BIN}" "${SCRIPTS_DIR}/local_llexsim.sh" start
 success "Simulator is up with clean ledger/runtime state."
 
-echo ""
-
-# ── Step 3: run the demo FIX client in the foreground ────────────────────────
-info "Step 3/3 — starting demo FIX client at ${RATE} msg/s (foreground, Ctrl+C to stop)..."
-"${BASH_BIN}" "${SCRIPTS_DIR}/local_fix_demo_client.sh" run "${RATE}"
+if [[ "${WITH_DEMO_CLIENT}" == true ]]; then
+    echo ""
+    info "Step 3/${TOTAL_STEPS} — starting demo FIX client at ${RATE} msg/s (foreground, Ctrl+C to stop)..."
+    "${BASH_BIN}" "${SCRIPTS_DIR}/local_fix_demo_client.sh" run "${RATE}"
+else
+    echo ""
+    info "Default startup completed without the terminal FIX demo client."
+    info "Start it explicitly any time with: ./scripts/local_fix_demo_client.sh run ${RATE}"
+fi
 

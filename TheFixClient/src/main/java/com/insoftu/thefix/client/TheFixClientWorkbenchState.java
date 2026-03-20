@@ -6,24 +6,16 @@ import io.vertx.core.json.JsonObject;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.text.NumberFormat;
-import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 
-final class TheFixClientWorkbenchState {
-    private static final int MAX_EVENTS = 10;
+final class TheFixClientWorkbenchState implements AutoCloseable {
     private static final NumberFormat CURRENCY_FORMAT = NumberFormat.getCurrencyInstance(Locale.US);
-    private static final DateTimeFormatter EVENT_TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss")
-            .withLocale(Locale.US)
-            .withZone(ZoneId.systemDefault());
 
-    private final Deque<WorkbenchEvent> recentEvents = new ArrayDeque<>();
+    private final TheFixClientConfig config;
+    private final TheFixClientFixService fixService;
     private final List<WatchlistItem> watchlist = List.of(
             new WatchlistItem("AAPL", "NASDAQ", "210.42", "+0.48%", "up"),
             new WatchlistItem("MSFT", "NASDAQ", "492.13", "+0.19%", "up"),
@@ -32,67 +24,95 @@ final class TheFixClientWorkbenchState {
     );
     private final List<String> launchChecklist = List.of(
             "Confirm FIX session host, port, and CompIDs with simulator settings.",
-            "Validate trader profile defaults before enabling live routing actions.",
-            "Review order preview warnings before sending to market gateways.",
-            "Use session pulse checks to confirm workstation responsiveness during rehearsals."
+            "Prime the FIX initiator before routing manual tickets or demo-rate order flow.",
+            "Preview trader intent and notional before releasing manual orders.",
+            "Watch execution reports and rejects in the live event stream after every send."
     );
 
-    private boolean connected;
-    private Instant connectedAt;
     private int pulseChecks;
 
-    TheFixClientWorkbenchState() {
-        addEvent("INFO", "Desk initialized", "TheFixClient workstation shell is live and ready for UI review.");
-        addEvent("INFO", "Next wiring step", "Session controls will be connected to the FIX demo client flow in the next checkpoint.");
+    TheFixClientWorkbenchState(TheFixClientConfig config) {
+        this(config, new TheFixClientFixService(config));
+    }
+
+    TheFixClientWorkbenchState(TheFixClientConfig config, TheFixClientFixService fixService) {
+        this.config = config;
+        this.fixService = fixService;
     }
 
     synchronized JsonObject snapshot() {
+        JsonObject kpis = fixService.kpiSnapshot();
+        kpis.put("pulseChecks", pulseChecks);
+
         return new JsonObject()
                 .put("applicationName", "TheFixClient")
                 .put("subtitle", "HSBC Trader Workstation")
-                .put("environment", "Local simulator integration checkpoint")
+                .put("environment", "Live simulator-linked FIX workstation")
                 .put("generatedAt", Instant.now().toString())
-                .put("session", buildSession())
-                .put("kpis", buildKpis())
+                .put("session", fixService.sessionSnapshot())
+                .put("kpis", kpis)
                 .put("watchlist", buildWatchlist())
                 .put("launchChecklist", new JsonArray(launchChecklist))
-                .put("recentEvents", buildEvents());
+                .put("recentEvents", fixService.recentEventsJson())
+                .put("recentOrders", fixService.recentOrdersJson())
+                .put("defaults", new JsonObject().put("defaultFlowRate", config.defaultRatePerSecond()));
     }
 
     synchronized JsonObject connect() {
-        if (connected) {
-            addEvent("WARN", "Session already primed", "The workstation is already marked connected in shell mode.");
-            return snapshot();
-        }
-        connected = true;
-        connectedAt = Instant.now();
-        addEvent("SUCCESS", "Session primed", "Desk controls switched to connected shell mode for UI validation.");
+        fixService.connect();
         return snapshot();
     }
 
     synchronized JsonObject disconnect() {
-        if (!connected) {
-            addEvent("WARN", "No active shell session", "Disconnect requested while the workstation was already idle.");
-            return snapshot();
-        }
-        connected = false;
-        connectedAt = null;
-        addEvent("INFO", "Session released", "Desk controls returned to standby mode.");
+        fixService.disconnect();
         return snapshot();
     }
 
     synchronized JsonObject pulseTest() {
         pulseChecks++;
-        addEvent("INFO", "Pulse check executed", "Workbench heartbeat and operator controls responded normally.");
+        fixService.pulseTest();
+        return snapshot();
+    }
+
+    synchronized JsonObject sendOrder(JsonObject request) {
+        OrderPreview preview = buildPreview(request);
+        if (!preview.warnings().isEmpty()) {
+            return snapshot();
+        }
+        fixService.sendOrder(preview.toOrderRequest());
+        return snapshot();
+    }
+
+    synchronized JsonObject startOrderFlow(JsonObject request) {
+        OrderPreview preview = buildPreview(request);
+        if (!preview.warnings().isEmpty()) {
+            return snapshot();
+        }
+        int requestedRate = request == null ? config.defaultRatePerSecond() : Math.max(1, request.getInteger("ratePerSecond", config.defaultRatePerSecond()));
+        fixService.startAutoFlow(preview.toOrderRequest(), requestedRate);
+        return snapshot();
+    }
+
+    synchronized JsonObject stopOrderFlow() {
+        fixService.stopAutoFlow();
         return snapshot();
     }
 
     synchronized JsonObject previewOrder(JsonObject request) {
-        String symbol = sanitizeText(request.getString("symbol"), "AAPL");
-        String side = sanitizeText(request.getString("side"), "BUY").toUpperCase(Locale.US);
-        String timeInForce = sanitizeText(request.getString("timeInForce"), "DAY").toUpperCase(Locale.US);
-        int quantity = request.getInteger("quantity", 100);
-        double rawPrice = request.getDouble("price", 100.25d);
+        return buildPreview(request).toJson(fixService.isLoggedOn());
+    }
+
+    @Override
+    public synchronized void close() {
+        fixService.close();
+    }
+
+    private OrderPreview buildPreview(JsonObject request) {
+        String symbol = sanitizeText(request == null ? null : request.getString("symbol"), "AAPL").toUpperCase(Locale.US);
+        String side = sanitizeText(request == null ? null : request.getString("side"), "BUY").toUpperCase(Locale.US);
+        String timeInForce = sanitizeText(request == null ? null : request.getString("timeInForce"), "DAY").toUpperCase(Locale.US);
+        int quantity = request == null ? 100 : request.getInteger("quantity", 100);
+        double rawPrice = request == null ? 100.25d : request.getDouble("price", 100.25d);
 
         List<String> warnings = new ArrayList<>();
         if (symbol.isBlank()) {
@@ -101,58 +121,34 @@ final class TheFixClientWorkbenchState {
         if (!side.equals("BUY") && !side.equals("SELL")) {
             warnings.add("Side must be BUY or SELL.");
         }
+        if (!List.of("DAY", "IOC", "FOK").contains(timeInForce)) {
+            warnings.add("Time in force must be DAY, IOC, or FOK.");
+        }
         if (quantity <= 0) {
             warnings.add("Quantity must be greater than zero.");
         }
-        if (rawPrice <= 0) {
+        if (rawPrice <= 0d) {
             warnings.add("Limit price must be greater than zero.");
         }
 
         BigDecimal price = BigDecimal.valueOf(Math.max(rawPrice, 0d)).setScale(2, RoundingMode.HALF_UP);
         BigDecimal notional = price.multiply(BigDecimal.valueOf(Math.max(quantity, 0L))).setScale(2, RoundingMode.HALF_UP);
-
         String status = warnings.isEmpty()
-                ? (connected ? "READY_FOR_ROUTING" : "READY_PENDING_CONNECTION")
+                ? (fixService.isLoggedOn() ? "READY_FOR_ROUTING" : "READY_PENDING_CONNECTION")
                 : "INVALID";
 
         String recommendation;
         if (!warnings.isEmpty()) {
             recommendation = "Resolve the highlighted validation issues before promoting this ticket to a live session.";
-        } else if (connected) {
-            recommendation = "Ticket looks good for the next checkpoint when live FIX wiring is enabled.";
+        } else if (fixService.isLoggedOn()) {
+            recommendation = "Ticket is ready for live routing through the simulator-linked FIX initiator.";
         } else {
-            recommendation = "Preview is valid. Prime the workstation session before rehearsing end-to-end routing.";
+            recommendation = "Preview is valid. Prime the session before routing or starting the demo order flow.";
         }
 
-        return new JsonObject()
-                .put("status", status)
-                .put("summary", side + " " + quantity + " " + symbol + " @ " + price + " " + timeInForce)
-                .put("notional", CURRENCY_FORMAT.format(notional))
-                .put("recommendation", recommendation)
-                .put("connected", connected)
-                .put("warnings", new JsonArray(warnings));
-    }
-
-    private JsonObject buildSession() {
-        return new JsonObject()
-                .put("connected", connected)
-                .put("status", connected ? "Connected shell mode" : "Standby")
-                .put("host", "localhost")
-                .put("port", 9880)
-                .put("beginString", "FIX.4.4")
-                .put("senderCompId", "HSBC_TRDR01")
-                .put("targetCompId", "LLEXSIM")
-                .put("mode", "UI shell")
-                .put("uptime", formatUptime());
-    }
-
-    private JsonObject buildKpis() {
-        return new JsonObject()
-                .put("readyState", connected ? "Desk primed" : "UI ready")
-                .put("activeAlerts", connected ? 1 : 2)
-                .put("openOrders", connected ? 6 : 0)
-                .put("pulseChecks", pulseChecks)
-                .put("sessionUptime", formatUptime());
+        return new OrderPreview(symbol, side, quantity, price.doubleValue(), timeInForce, status,
+                side + " " + quantity + " " + symbol + " @ " + price + " " + timeInForce,
+                CURRENCY_FORMAT.format(notional), recommendation, warnings);
     }
 
     private JsonArray buildWatchlist() {
@@ -163,40 +159,6 @@ final class TheFixClientWorkbenchState {
         return items;
     }
 
-    private JsonArray buildEvents() {
-        JsonArray items = new JsonArray();
-        for (WorkbenchEvent recentEvent : recentEvents) {
-            items.add(recentEvent.toJson());
-        }
-        return items;
-    }
-
-    private void addEvent(String level, String title, String detail) {
-        recentEvents.addFirst(new WorkbenchEvent(Instant.now(), level, title, detail));
-        while (recentEvents.size() > MAX_EVENTS) {
-            recentEvents.removeLast();
-        }
-    }
-
-    private String formatUptime() {
-        if (!connected || connectedAt == null) {
-            return "Not connected";
-        }
-        Duration duration = Duration.between(connectedAt, Instant.now());
-        long seconds = duration.toSeconds();
-        if (seconds < 60) {
-            return seconds + "s";
-        }
-        long minutes = seconds / 60;
-        long remainingSeconds = seconds % 60;
-        if (minutes < 60) {
-            return minutes + "m " + remainingSeconds + "s";
-        }
-        long hours = minutes / 60;
-        long remainingMinutes = minutes % 60;
-        return hours + "h " + remainingMinutes + "m";
-    }
-
     private static String sanitizeText(String raw, String defaultValue) {
         if (raw == null || raw.isBlank()) {
             return defaultValue;
@@ -204,13 +166,30 @@ final class TheFixClientWorkbenchState {
         return raw.trim();
     }
 
-    private record WorkbenchEvent(Instant timestamp, String level, String title, String detail) {
-        JsonObject toJson() {
+    private record OrderPreview(
+            String symbol,
+            String side,
+            int quantity,
+            double price,
+            String timeInForce,
+            String status,
+            String summary,
+            String notional,
+            String recommendation,
+            List<String> warnings
+    ) {
+        JsonObject toJson(boolean connected) {
             return new JsonObject()
-                    .put("time", EVENT_TIME_FORMAT.format(timestamp))
-                    .put("level", level)
-                    .put("title", title)
-                    .put("detail", detail);
+                    .put("status", status)
+                    .put("summary", summary)
+                    .put("notional", notional)
+                    .put("recommendation", recommendation)
+                    .put("connected", connected)
+                    .put("warnings", new JsonArray(warnings));
+        }
+
+        TheFixClientFixService.OrderRequest toOrderRequest() {
+            return new TheFixClientFixService.OrderRequest(symbol, side, quantity, price, timeInForce);
         }
     }
 
@@ -225,4 +204,3 @@ final class TheFixClientWorkbenchState {
         }
     }
 }
-

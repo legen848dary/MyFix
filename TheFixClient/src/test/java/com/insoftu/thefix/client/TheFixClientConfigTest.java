@@ -18,5 +18,29 @@ class TheFixClientConfigTest {
     void parsePortAcceptsValidTcpPorts() {
         assertEquals(8088, TheFixClientConfig.parsePort("8088"));
     }
+
+    @Test
+    void toFixDemoClientConfigCarriesFixSessionSettings() {
+        TheFixClientConfig config = new TheFixClientConfig(
+                "0.0.0.0",
+                8081,
+                "127.0.0.1",
+                9880,
+                "FIX.4.4",
+                "HSBC_TRDR01",
+                "LLEXSIM",
+                "FIX.4.4",
+                30,
+                5,
+                25,
+                "logs/thefixclient/test-quickfixj",
+                false
+        );
+
+        assertEquals("127.0.0.1", config.toFixDemoClientConfig().host());
+        assertEquals(9880, config.toFixDemoClientConfig().port());
+        assertEquals("HSBC_TRDR01", config.toFixDemoClientConfig().senderCompId());
+        assertEquals("LLEXSIM", config.toFixDemoClientConfig().targetCompId());
+    }
 }
 
