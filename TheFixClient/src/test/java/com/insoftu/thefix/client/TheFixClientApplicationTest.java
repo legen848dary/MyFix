@@ -7,10 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class TheFixClientApplicationTest {
 
     @Test
-    void startupMessageDescribesTheClientModule() {
+    void startupMessagePointsToTheWebWorkstationUrl() {
         assertEquals(
-                "TheFixClient is ready for FIX client implementation.",
-                TheFixClientApplication.startupMessage()
+                "TheFixClient trader workstation is available at http://localhost:8081",
+                TheFixClientApplication.startupMessage(new TheFixClientConfig("0.0.0.0", 8081))
         );
     }
 }

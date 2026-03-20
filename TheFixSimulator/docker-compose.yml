@@ -1,0 +1,104 @@
+services:
+  llexsimulator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: llexsimulator:1.0-SNAPSHOT
+    container_name: llexsimulator
+    ports:
+      - "8080:8080"    # Vert.x Web UI + REST API
+      - "9880:9880"    # FIX acceptor — FIX 4.2 / 4.4 / 5.0
+    volumes:
+      - ${LLEX_CONFIG_DIR:-./config}:/app/config:ro             # override simulator.properties without rebuild
+      - ./logs:/app/logs                    # persist logs on host — survives container restarts/removal
+    # tmpfs for Artio's SequenceNumberIndexWriter state files.
+    # Artio calls writableFile.force() (msync) every ~term-length of FIX messages
+    # (~24 k msgs at term-length=8 MB / ~350 bytes per msg).  On Docker Desktop /
+    # macOS the container's /tmp is backed by the VM virtual disk; even a single
+    # msync can block the Artio engine thread for several seconds, long enough for
+    # the QuickFIX/J client's HeartBtInt+1 timer to fire → REMOTE_DISCONNECT.
+    # A tmpfs mount makes msync() a no-op (no disk I/O at all).  The state files
+    # only need to exist for the lifetime of a single container run because we use
+    # SessionPersistenceStrategy.alwaysTransient().
+    tmpfs:
+      - /tmp/artio-state:size=64m,mode=1777
+    environment:
+      JAVA_OPTS: >-
+        -XX:+UseZGC
+        -XX:+ZGenerational
+        -Xms1g -Xmx1g
+        -XX:+AlwaysPreTouch
+        -XX:+DisableExplicitGC
+        -XX:+PerfDisableSharedMem
+        -Daeron.dir=/dev/shm/aeron-llexsim
+        -Daeron.ipc.term.buffer.length=8388608
+        -Daeron.threading.mode=SHARED
+        -Daeron.shared.idle.strategy=backoff
+        -Dagrona.disable.bounds.checks=true
+        --add-exports java.base/jdk.internal.misc=ALL-UNNAMED
+        --add-opens java.base/sun.nio.ch=ALL-UNNAMED
+        --add-opens java.base/java.nio=ALL-UNNAMED
+        --add-opens java.base/java.lang=ALL-UNNAMED
+    # Aeron IPC prefers /dev/shm for latency, but the simulator now falls back to /tmp
+    # automatically if usable shared memory is too small for startup.
+    shm_size: "512mb"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    # CPU affinity — pin to first 4 cores for deterministic latency
+    # Adjust "0-3" for your host topology
+    cpuset: "0-3"
+    mem_limit: 2g
+    mem_reservation: 1g
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  fix-demo-client:
+    image: llexsimulator:1.0-SNAPSHOT
+    container_name: llexsimulator-fix-demo-client
+    profiles: ["demo-client"]
+    depends_on:
+      llexsimulator:
+        condition: service_healthy
+    entrypoint: ["java"]
+    command:
+      - "-Xms${FIX_DEMO_JAVA_XMS:-128m}"
+      - "-Xmx${FIX_DEMO_JAVA_XMX:-256m}"
+      - "-Dlog4j2.contextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector"
+      - "-Dlog4j2.asyncLoggerRingBufferSize=262144"
+      - "-Dllexsim.log.dir=/app/logs/fix-demo-client"
+      - "-Dllexsim.log.name=fix-demo-client"
+      - "-Dfix.demo.logDir=/app/logs/fix-demo-client/quickfixj"
+      - "-Dfix.demo.host=${FIX_CLIENT_HOST:-llexsimulator}"
+      - "-Dfix.demo.port=${FIX_CLIENT_PORT:-9880}"
+      - "-Dfix.demo.beginString=${FIX_CLIENT_BEGIN_STRING:-FIX.4.4}"
+      - "-Dfix.demo.senderCompId=${FIX_CLIENT_SENDER_COMP_ID:-CLIENT1}"
+      - "-Dfix.demo.targetCompId=${FIX_CLIENT_TARGET_COMP_ID:-LLEXSIM}"
+      - "-Dfix.demo.defaultApplVerId=${FIX_CLIENT_DEFAULT_APPL_VER_ID:-FIX.4.4}"
+      - "-Dfix.demo.symbol=${FIX_CLIENT_SYMBOL:-AAPL}"
+      - "-Dfix.demo.side=${FIX_CLIENT_SIDE:-BUY}"
+      - "-Dfix.demo.orderQty=${FIX_CLIENT_ORDER_QTY:-100}"
+      - "-Dfix.demo.price=${FIX_CLIENT_PRICE:-100.25}"
+      - "-Dfix.demo.rawLoggingEnabled=${FIX_CLIENT_RAW_LOGGING_ENABLED:-false}"
+      - "-Dfix.demo.heartBtInt=${FIX_CLIENT_HEARTBTINT:-30}"
+      - "-Dfix.demo.reconnectIntervalSec=${FIX_CLIENT_RECONNECT_INTERVAL_SEC:-5}"
+      - "-cp"
+      - "app.jar"
+      - "com.llexsimulator.client.FixDemoClientMain"
+      - "${FIX_DEMO_RATE:-500}"
+    volumes:
+      - ./logs:/app/logs
+    mem_limit: "${FIX_DEMO_MEM_LIMIT:-384m}"
+    mem_reservation: "${FIX_DEMO_MEM_RESERVATION:-192m}"
+    restart: "no"
+
+

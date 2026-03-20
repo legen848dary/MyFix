@@ -1,0 +1,63 @@
+<configuration>
+
+  <property name="LOG_DIR" value="${llexsim.log.dir:-logs}"/>
+  <property name="LOG_NAME" value="${llexsim.log.name:-llexsimulator}"/>
+
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <!--
+    Async appender: neverBlock=true prevents the hot path from blocking on logging.
+    immediateFlush=false on the underlying file appender reduces I/O syscalls.
+  -->
+  <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
+    <queueSize>512</queueSize>
+    <neverBlock>true</neverBlock>
+    <discardingThreshold>0</discardingThreshold>
+    <appender-ref ref="FILE"/>
+  </appender>
+
+  <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_DIR}/${LOG_NAME}.log</file>
+    <immediateFlush>false</immediateFlush>
+    <!--
+      SizeAndTimeBasedRollingPolicy:
+        - Rolls when the active file exceeds 10 MB  (%i resets to 0 each new day)
+        - Rolls daily regardless of size
+        - Archived files are gzip-compressed to save disk space
+        - cleanHistoryOnStart=false  → old rolled files survive container restarts
+        - maxHistory=14 files  + totalSizeCap=200MB cap as a safety net
+    -->
+    <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+      <fileNamePattern>${LOG_DIR}/archive/${LOG_NAME}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+      <maxFileSize>10MB</maxFileSize>
+      <maxHistory>14</maxHistory>
+      <totalSizeCap>200MB</totalSizeCap>
+      <cleanHistoryOnStart>false</cleanHistoryOnStart>
+    </rollingPolicy>
+    <encoder>
+      <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <!-- Keep QuickFIX/J noise at WARN; it's chatty -->
+  <logger name="quickfixj" level="WARN"/>
+  <logger name="org.quickfixj" level="WARN"/>
+
+  <!-- Aeron/Agrona internal logs are verbose; keep at WARN -->
+  <logger name="io.aeron" level="WARN"/>
+  <logger name="org.agrona" level="WARN"/>
+
+  <!-- Application logs at INFO -->
+  <logger name="com.llexsimulator" level="INFO"/>
+
+  <root level="WARN">
+    <appender-ref ref="CONSOLE"/>
+    <appender-ref ref="ASYNC_FILE"/>
+  </root>
+
+</configuration>
+

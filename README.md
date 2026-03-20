@@ -4,8 +4,8 @@
 
 ## Modules
 
-- `TheFixClient` — starter module for the FIX client implementation.
-- `TheFixSimulator` — starter module that will receive the simulator code from the existing repository.
+- `TheFixClient` — trader-facing web workstation shell for the future FIX client, currently served on `http://localhost:8081`.
+- `TheFixSimulator` — imported simulator platform with its own web UI on `http://localhost:8080`, FIX acceptor on `tcp://localhost:9880`, and existing Docker/demo-client tooling.
 
 ## Project layout
 
@@ -33,6 +33,9 @@
 ./gradlew :TheFixSimulator:run
 ```
 
+- `TheFixClient` UI: `http://localhost:8081`
+- `TheFixSimulator` UI: `http://localhost:8080`
+
 ## Run tests
 
 ```bash
@@ -43,5 +46,11 @@
 
 ## Next step
 
-When you share the GitHub repository URL for the existing simulator code, the code can be moved into `TheFixSimulator` and the build can be adjusted to match its dependencies and entry points.
+The next implementation checkpoint is to wire `TheFixClient` to the real FIX demo-client flow used by `TheFixSimulator`, then containerize `TheFixClient` so all three components can run together locally:
+
+- `TheFixClient` web workstation
+- `TheFixSimulator`
+- terminal demo FIX client
+
+For continuity across chat sessions, see `PROGRESS.md`.
 

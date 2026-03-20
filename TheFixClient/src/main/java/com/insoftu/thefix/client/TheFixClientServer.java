@@ -1,0 +1,100 @@
+package com.insoftu.thefix.client;
+
+import io.vertx.core.Vertx;
+import io.vertx.core.VertxOptions;
+import io.vertx.core.http.HttpServer;
+import io.vertx.core.http.HttpServerOptions;
+import io.vertx.core.json.JsonObject;
+import io.vertx.ext.web.Router;
+import io.vertx.ext.web.handler.BodyHandler;
+import io.vertx.ext.web.handler.StaticHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.concurrent.TimeUnit;
+
+final class TheFixClientServer {
+    private static final Logger log = LoggerFactory.getLogger(TheFixClientServer.class);
+
+    private final TheFixClientConfig config;
+    private final TheFixClientWorkbenchState workbenchState;
+    private final Vertx vertx;
+
+    private HttpServer httpServer;
+
+    TheFixClientServer(TheFixClientConfig config) {
+        this(config, new TheFixClientWorkbenchState());
+    }
+
+    TheFixClientServer(TheFixClientConfig config, TheFixClientWorkbenchState workbenchState) {
+        this.config = config;
+        this.workbenchState = workbenchState;
+        this.vertx = Vertx.vertx(new VertxOptions().setPreferNativeTransport(true));
+    }
+
+    public void start() {
+        Router router = Router.router(vertx);
+        router.route("/api/*").handler(BodyHandler.create());
+
+        router.get("/api/health").handler(ctx -> writeJson(ctx.response(), new JsonObject()
+                .put("status", "UP")
+                .put("application", "TheFixClient")
+                .put("mode", "web-shell")
+                .put("port", config.port())));
+
+        router.get("/api/overview").handler(ctx -> writeJson(ctx.response(), workbenchState.snapshot()));
+        router.post("/api/session/connect").handler(ctx -> writeJson(ctx.response(), workbenchState.connect()));
+        router.post("/api/session/disconnect").handler(ctx -> writeJson(ctx.response(), workbenchState.disconnect()));
+        router.post("/api/session/pulse-test").handler(ctx -> writeJson(ctx.response(), workbenchState.pulseTest()));
+        router.post("/api/order-ticket/preview").handler(ctx -> {
+            JsonObject payload = ctx.body() == null ? new JsonObject() : ctx.body().asJsonObject();
+            writeJson(ctx.response(), workbenchState.previewOrder(payload));
+        });
+
+        router.route().handler(StaticHandler.create("web")
+                .setCachingEnabled(false)
+                .setIndexPage("index.html"));
+
+        HttpServerOptions options = new HttpServerOptions()
+                .setHost(config.host())
+                .setPort(config.port())
+                .setTcpNoDelay(true)
+                .setReusePort(true);
+
+        try {
+            httpServer = vertx.createHttpServer(options)
+                    .requestHandler(router)
+                    .listen()
+                    .toCompletionStage()
+                    .toCompletableFuture()
+                    .get(30, TimeUnit.SECONDS);
+            log.info("TheFixClient workstation server started on port {}", httpServer.actualPort());
+        } catch (Exception exception) {
+            throw new IllegalStateException("Unable to start TheFixClient web server", exception);
+        }
+    }
+
+    public void stop() {
+        try {
+            if (httpServer != null) {
+                httpServer.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                httpServer = null;
+            }
+        } catch (Exception exception) {
+            log.warn("Error while stopping TheFixClient HTTP server", exception);
+        }
+
+        try {
+            vertx.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        } catch (Exception exception) {
+            log.warn("Error while stopping TheFixClient Vert.x runtime", exception);
+        }
+    }
+
+    private static void writeJson(io.vertx.core.http.HttpServerResponse response, JsonObject payload) {
+        response.putHeader("content-type", "application/json")
+                .end(payload.encode());
+    }
+}
+
+
