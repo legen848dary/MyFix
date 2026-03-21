@@ -43,6 +43,39 @@
 - start and stop demo-rate order flow from the browser
 - shut down the FIX service cleanly when the web server exits
 
+## Start both web apps in one command
+
+### Docker web stack
+
+```bash
+./scripts/start_web_stack_docker.sh
+./scripts/stop_web_stack_docker.sh
+```
+
+This starts/stops:
+
+- `TheFixSimulator` on `http://localhost:8080`
+- `TheFixClient` on `http://localhost:8081`
+
+### Direct JVM web stack
+
+```bash
+./scripts/start_web_stack.sh
+./scripts/stop_web_stack.sh
+```
+
+This builds the required artifacts and runs both apps directly on the host JVM.
+
+### Optional terminal demo FIX client
+
+The terminal demo FIX client remains opt-in and is not part of the default web stack:
+
+```bash
+cd TheFixSimulator
+./scripts/local_fix_demo_client.sh start 50
+./scripts/local_fix_demo_client.sh stop
+```
+
 ## Run tests
 
 ```bash
@@ -53,11 +86,7 @@
 
 ## Next step
 
-The next implementation checkpoint is to containerize `TheFixClient` so the default local stack can bring up both web applications together while keeping the terminal demo FIX client opt-in:
-
-- `TheFixClient` web workstation
-- `TheFixSimulator`
-- terminal demo FIX client (on demand)
+The next implementation checkpoint is to polish and extend the new combined web-stack workflows while keeping the terminal demo FIX client opt-in.
 
 For continuity across chat sessions, see `PROGRESS.md`.
 

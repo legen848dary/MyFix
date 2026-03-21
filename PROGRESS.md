@@ -13,8 +13,9 @@ A new session should read this file first, then continue from the **Immediate ne
   - `TheFixClient`
   - `TheFixSimulator`
 - `TheFixSimulator` has been imported from `LLExSimulator` into this monorepo.
-- `TheFixClient` has been upgraded from a placeholder console app into a live simulator-linked FIX workstation.
-- Existing simulator Docker + terminal demo FIX client workflow has been adapted to work from this monorepo, with the terminal demo client now opt-in for combined startup helpers.
+- `TheFixClient` has been upgraded from a placeholder console app into a live simulator-linked FIX workstation and is now containerized.
+- The repo now has one-command start/stop workflows for both web apps in Docker and direct JVM modes.
+- The terminal demo FIX client remains opt-in and is no longer started by default by the combined startup helpers.
 - Once all verification commands below are green, it is safe to commit and push the checkpoint.
 
 ## Latest verified green state
@@ -38,6 +39,20 @@ Verified on: 2026-03-21
   - `./scripts/local_clean_and_run.sh` (starts simulator only by default)
   - `./scripts/local_fix_demo_client.sh start 50` (explicit opt-in)
   - simulator API showing a logged-on `FIX.4.4` session
+- Combined Docker web stack green via:
+  - `./scripts/start_web_stack_docker.sh`
+  - `GET http://localhost:8080/api/health`
+  - `GET http://localhost:8081/api/health`
+  - `POST http://localhost:8081/api/session/connect`
+  - `POST http://localhost:8081/api/order-ticket/send`
+  - simulator `/api/sessions` showing the logged-on `HSBC_TRDR01` session
+  - `./scripts/stop_web_stack_docker.sh`
+- Combined direct JVM web stack green via:
+  - `./scripts/start_web_stack.sh`
+  - `GET http://localhost:8080/api/health`
+  - `GET http://localhost:8081/api/health`
+  - `GET http://localhost:8081/api/overview`
+  - `./scripts/stop_web_stack.sh`
 
 ### Important fix landed during verification
 
@@ -128,6 +143,31 @@ Key files:
 - `TheFixSimulator/scripts/local_clean_and_run.sh`
 - `TheFixSimulator/scripts/local_rebuild_and_run.sh`
 
+### Checkpoint 5 — Combined web stack launchers
+Status: Completed
+
+What was done:
+- Containerized `TheFixClient`
+- Added a root Docker Compose file for the two-web-app stack
+- Added one-command Docker lifecycle scripts:
+  - `scripts/start_web_stack_docker.sh`
+  - `scripts/stop_web_stack_docker.sh`
+- Added one-command direct JVM lifecycle scripts:
+  - `scripts/start_web_stack.sh`
+  - `scripts/stop_web_stack.sh`
+- Added idempotent start behavior and clean stop behavior for both modes
+- Kept the terminal demo FIX client outside the default web stack and available only as an explicit opt-in path
+
+Key files:
+- `TheFixClient/Dockerfile`
+- `TheFixClient/build.gradle.kts`
+- `docker-compose.web-stack.yml`
+- `scripts/web_stack_common.sh`
+- `scripts/start_web_stack_docker.sh`
+- `scripts/stop_web_stack_docker.sh`
+- `scripts/start_web_stack.sh`
+- `scripts/stop_web_stack.sh`
+
 ## Verified behavior to preserve
 
 ### TheFixSimulator
@@ -149,6 +189,17 @@ Key files:
   - `POST /api/order-flow/start`
   - `POST /api/order-flow/stop`
 
+### Combined web stack commands
+- Docker:
+  - `./scripts/start_web_stack_docker.sh`
+  - `./scripts/stop_web_stack_docker.sh`
+- Direct JVM:
+  - `./scripts/start_web_stack.sh`
+  - `./scripts/stop_web_stack.sh`
+- Optional terminal demo FIX client:
+  - `cd TheFixSimulator && ./scripts/local_fix_demo_client.sh start 50`
+  - `cd TheFixSimulator && ./scripts/local_fix_demo_client.sh stop`
+
 ## Important implementation notes
 
 ### Build structure
@@ -169,13 +220,14 @@ Key files:
 - static web assets under `TheFixClient/src/main/resources/web`
 - QuickFIX/J initiator service reusing simulator demo-client session settings
 - browser-driven manual send and start/stop order-flow controls backed by real FIX logic
+- Dockerized runtime image built from `installDist`
 
 ## Pending tasks
 
 ### High priority
-- Add Docker/container support for `TheFixClient`
-- Extend local deployment so the default local stack can bring up both web apps together
-- Keep the terminal demo FIX client available only as an explicit opt-in workflow
+- Polish combined web-stack docs and operational ergonomics as needed
+- Optionally add a combined workflow that can also start the terminal demo FIX client on demand
+- Consider adding automated smoke tests around the new launcher scripts
 
 ### Next integration milestone
 - Extend local deployment so all 3 components can run together when explicitly requested:
@@ -197,6 +249,7 @@ cd "/Users/debjyotisarkar/IdeaProjects/MyFix"
 ./gradlew --no-daemon :TheFixClient:test
 ./gradlew --no-daemon :TheFixSimulator:test
 ./gradlew --no-daemon :TheFixSimulator:shadowJar -x :TheFixSimulator:test
+./gradlew --no-daemon :TheFixClient:installDist
 ```
 
 ### Run TheFixClient directly
@@ -228,6 +281,25 @@ curl -sf http://localhost:8080/api/health
 curl -sf http://localhost:8080/api/sessions
 ```
 
+### Combined Docker web stack
+```bash
+cd "/Users/debjyotisarkar/IdeaProjects/MyFix"
+./scripts/start_web_stack_docker.sh
+curl -sf http://localhost:8080/api/health
+curl -sf http://localhost:8081/api/health
+curl -sf -X POST http://localhost:8081/api/session/connect
+./scripts/stop_web_stack_docker.sh
+```
+
+### Combined direct JVM web stack
+```bash
+cd "/Users/debjyotisarkar/IdeaProjects/MyFix"
+./scripts/start_web_stack.sh
+curl -sf http://localhost:8080/api/health
+curl -sf http://localhost:8081/api/health
+./scripts/stop_web_stack.sh
+```
+
 ### Stop local processes / containers
 ```bash
 if lsof -ti tcp:8081 >/dev/null; then kill $(lsof -ti tcp:8081); fi
@@ -246,17 +318,15 @@ User requested:
 
 ## Immediate next tasks
 
-1. Containerize `TheFixClient`
-2. Add a default local deployment path for the two web apps:
-   - `TheFixClient`
-   - `TheFixSimulator`
-3. Keep the terminal demo FIX client available as an explicit opt-in workflow only
+1. Improve combined web-stack polish/docs/tests as needed
+2. Keep the terminal demo FIX client available as an explicit opt-in workflow only
+3. Consider adding optional combined-stack support for the terminal demo FIX client when explicitly requested
 
 ## If a new chat session resumes from here
 
 Suggested prompt:
 
 ```text
-Read PROGRESS.md and resume from the Immediate next tasks section. Verify the latest green state if needed, then continue with TheFixClient containerization and the default two-web-app local deployment path.
+Read PROGRESS.md and resume from the Immediate next tasks section. Verify the latest green state if needed, then continue improving the combined web-stack workflows and any related container/runtime polish.
 ```
 

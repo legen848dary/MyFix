@@ -1,0 +1,72 @@
+services:
+  llexsimulator:
+    build:
+      context: ./TheFixSimulator
+      dockerfile: Dockerfile
+    image: llexsimulator:1.0-SNAPSHOT
+    ports:
+      - "${WEB_STACK_SIM_WEB_PORT:-8080}:8080"
+      - "${WEB_STACK_FIX_PORT:-9880}:9880"
+    volumes:
+      - ${WEB_STACK_SIM_CONFIG_DIR:-./TheFixSimulator/config}:/app/config:ro
+      - ${WEB_STACK_SIM_LOG_DIR:-./TheFixSimulator/logs}:/app/logs
+    tmpfs:
+      - /tmp/artio-state:size=${LLEX_ARTIO_TMPFS_SIZE:-64m},mode=1777
+    environment:
+      JAVA_OPTS: >-
+        -XX:+UseZGC
+        -XX:+ZGenerational
+        -Xms${LLEX_JAVA_XMS:-1024m} -Xmx${LLEX_JAVA_XMX:-1024m}
+        -XX:+AlwaysPreTouch
+        -XX:+DisableExplicitGC
+        -XX:+PerfDisableSharedMem
+        -Daeron.dir=/dev/shm/aeron-llexsim
+        -Daeron.ipc.term.buffer.length=8388608
+        -Daeron.threading.mode=SHARED
+        -Daeron.shared.idle.strategy=backoff
+        -Dagrona.disable.bounds.checks=true
+        --add-exports java.base/jdk.internal.misc=ALL-UNNAMED
+        --add-opens java.base/sun.nio.ch=ALL-UNNAMED
+        --add-opens java.base/java.nio=ALL-UNNAMED
+        --add-opens java.base/java.lang=ALL-UNNAMED
+    shm_size: "${LLEX_SHM_SIZE:-512m}"
+    cpus: ${LLEX_CPUS:-2.0}
+    mem_limit: "${LLEX_MEM_LIMIT:-2944m}"
+    mem_reservation: "${LLEX_MEM_RESERVATION:-1600m}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  thefixclient:
+    build:
+      context: ./TheFixClient
+      dockerfile: Dockerfile
+    image: thefixclient:1.0-SNAPSHOT
+    depends_on:
+      llexsimulator:
+        condition: service_healthy
+    ports:
+      - "${WEB_STACK_CLIENT_PORT:-8081}:8081"
+    volumes:
+      - ${WEB_STACK_CLIENT_LOG_DIR:-./TheFixClient/logs}:/app/logs
+    environment:
+      THEFIX_CLIENT_PORT: "8081"
+      THEFIX_FIX_HOST: llexsimulator
+      THEFIX_FIX_PORT: "9880"
+      THEFIX_FIX_LOG_DIR: /app/logs/thefixclient/quickfixj
+      THEFIX_FIX_RAW_LOGGING_ENABLED: "${THEFIX_FIX_RAW_LOGGING_ENABLED:-false}"
+      JAVA_OPTS: >-
+        -Xms${THEFIX_CLIENT_JAVA_XMS:-256m}
+        -Xmx${THEFIX_CLIENT_JAVA_XMX:-512m}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8081/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
