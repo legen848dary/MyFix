@@ -70,6 +70,30 @@ This builds the required artifacts and runs both apps directly on the host JVM.
 
 `./scripts/status_web_stack.sh` reports the current Docker and direct-JVM stack state, including health endpoints, ports, pid/container ownership, and log locations.
 
+## Deploy to a native Linux droplet
+
+Use the native deployment flow when you want both web apps running directly on the droplet JVM behind Nginx + Let's Encrypt.
+
+### Shortest exact sequence
+
+```bash
+./scripts/setup_native_droplet.sh <droplet-host-or-ip> <ssh-private-key-path-or-glob> <ssh-user> --app-user <app-runtime-user>
+./scripts/deploy_native_stack.sh <droplet-host-or-ip> <ssh-private-key-path-or-glob> <ssh-user> --app-user <app-runtime-user> --sim-host <simulator-domain> --client-host <client-domain> --email <letsencrypt-email>
+```
+
+### Safer first deploy without TLS
+
+```bash
+./scripts/deploy_native_stack.sh <droplet-host-or-ip> <ssh-private-key-path-or-glob> <ssh-user> --app-user <app-runtime-user> --sim-host <simulator-domain> --client-host <client-domain> --email <letsencrypt-email> --skip-certbot
+./scripts/deploy_native_stack.sh <droplet-host-or-ip> <ssh-private-key-path-or-glob> <ssh-user> --app-user <app-runtime-user> --sim-host <simulator-domain> --client-host <client-domain> --email <letsencrypt-email>
+```
+
+Notes:
+
+- Run the scripts from the repository root on your local machine.
+- The scripts are designed for SSH/bootstrap as a privileged user and service runtime as a normal Linux user.
+- By default, the simulator FIX listener stays droplet-local while the two web UIs are published through Nginx on ports 80/443.
+
 ### Optional terminal demo FIX client
 
 The terminal demo FIX client remains opt-in and is not part of the default web stack:
