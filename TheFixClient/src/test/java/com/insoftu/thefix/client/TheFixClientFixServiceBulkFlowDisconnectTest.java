@@ -50,6 +50,9 @@ class TheFixClientFixServiceBulkFlowDisconnectTest {
 
     private static TheFixOrderRequest testOrder() {
         return new TheFixOrderRequest(
+                "NEW_ORDER_SINGLE",
+                "",
+                "",
                 "AAPL",
                 "BUY",
                 100,
@@ -60,7 +63,8 @@ class TheFixClientFixServiceBulkFlowDisconnectTest {
                 "PER_UNIT",
                 "AMERICAS",
                 "XNAS",
-                "USD"
+                "USD",
+                java.util.List.of()
         );
     }
 }

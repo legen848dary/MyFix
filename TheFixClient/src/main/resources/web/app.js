@@ -2,7 +2,7 @@ import { createApp, computed, onMounted, onUnmounted, reactive, ref, watch } fro
 
 const THEME_STORAGE_KEY = 'thefixclient-theme'
 const PAGE_OPTIONS = [
-  { code: 'order-input', label: 'Order Input' },
+  { code: 'order-input', label: 'Create FIX message' },
   { code: 'order-blotter', label: 'Order Blotter' },
   { code: 'settings', label: 'Settings' }
 ]
@@ -100,28 +100,43 @@ createApp({
           <article class="panel panel--focus">
             <div class="panel__header">
               <div>
-                <h2 class="panel__title">Order Input</h2>
-                <p class="panel__copy">Manual order entry and bulk routing in one comfortable input surface.</p>
+                <h2 class="panel__title">Create FIX message</h2>
+                <p class="panel__copy">Build live FIX messages with version-aware tags, custom FIDs, and bulk NOS routing from one operator surface.</p>
               </div>
               <span class="chip">{{ preview.status || 'Draft ready' }}</span>
             </div>
 
             <div class="workflow-toolbar">
               <div class="tab-bar tab-bar--inline">
-                <button class="tab" :class="{ 'tab--active': activeMode === 'single' }" @click="activeMode = 'single'">Single Order</button>
-                <button class="tab" :class="{ 'tab--active': activeMode === 'bulk' }" @click="activeMode = 'bulk'">Bulk Order</button>
+                <button class="tab" :class="{ 'tab--active': activeMode === 'single' }" @click="activeMode = 'single'">Single Message</button>
+                <button class="tab" :class="{ 'tab--active': activeMode === 'bulk' }" @click="activeMode = 'bulk'">Bulk NOS</button>
               </div>
               <div class="workflow-toolbar__actions">
-                <button v-if="activeMode === 'single'" class="button button--primary" @click="sendTicket" :disabled="busyAction === 'send'">Send live order</button>
-                <template v-else>
+                <button v-if="activeMode === 'single'" class="button button--primary" @click="sendTicket" :disabled="busyAction === 'send'">Send FIX message</button>
+                <template v-else-if="selectedMessageType?.supportsBulk">
                   <button class="button button--primary" @click="startBulkFlow" :disabled="busyAction === 'flow-start'">Start bulk flow</button>
                   <button class="button button--ghost" @click="stopBulkFlow" :disabled="busyAction === 'flow-stop'">Stop bulk flow</button>
                 </template>
+                <span v-else class="chip">Bulk flow supports NOS only</span>
               </div>
             </div>
 
             <div class="panel__body">
               <div class="order-grid order-grid--comfortable order-grid--trade-ticket">
+                <div class="field field--trade-ticket">
+                  <span class="field__label">Message type</span>
+                  <select v-model="orderDraft.messageType">
+                    <option v-for="messageType in messageTypes" :key="messageType.code" :value="messageType.code">{{ messageType.label }}</option>
+                  </select>
+                </div>
+                <div class="field field--trade-ticket">
+                  <span class="field__label">ClOrdID</span>
+                  <input v-model="orderDraft.clOrdId" placeholder="Auto-generated if blank" />
+                </div>
+                <div v-if="selectedMessageType?.requiresOrigClOrdId" class="field field--trade-ticket">
+                  <span class="field__label">OrigClOrdID</span>
+                  <input v-model="orderDraft.origClOrdId" placeholder="Existing ClOrdID to amend/cancel" />
+                </div>
                 <div class="field field--trade-ticket">
                   <span class="field__label">Region</span>
                   <select v-model="orderDraft.region" @change="onRegionChange">
@@ -146,21 +161,21 @@ createApp({
                 </div>
                 <div class="field field--trade-ticket">
                   <span class="field__label">Quantity</span>
-                  <input v-model.number="orderDraft.quantity" type="number" min="1" step="1" />
+                  <input v-model.number="orderDraft.quantity" type="number" min="0" step="1" />
                 </div>
-                <div class="field field--trade-ticket">
+                <div v-if="orderDraft.messageType !== 'ORDER_CANCEL_REQUEST'" class="field field--trade-ticket">
                   <span class="field__label">Order type</span>
                   <select v-model="orderDraft.orderType">
                     <option v-for="orderType in orderTypes" :key="orderType.code" :value="orderType.code">{{ orderType.label }}</option>
                   </select>
                 </div>
-                <div class="field field--trade-ticket">
+                <div v-if="orderDraft.messageType !== 'ORDER_CANCEL_REQUEST'" class="field field--trade-ticket">
                   <span class="field__label">Time in force</span>
                   <select v-model="orderDraft.timeInForce">
                     <option v-for="tif in timeInForces" :key="tif.code" :value="tif.code">{{ tif.label }}</option>
                   </select>
                 </div>
-                <div class="field field--trade-ticket">
+                <div v-if="orderDraft.messageType !== 'ORDER_CANCEL_REQUEST'" class="field field--trade-ticket">
                   <span class="field__label">Price type</span>
                   <select v-model="orderDraft.priceType">
                     <option v-for="priceType in priceTypes" :key="priceType.code" :value="priceType.code">{{ priceType.label }}</option>
@@ -170,17 +185,49 @@ createApp({
                   <span class="field__label">Currency</span>
                   <input v-model="orderDraft.currency" maxlength="3" />
                 </div>
-                <div class="field field--trade-ticket">
+                <div v-if="orderDraft.messageType !== 'ORDER_CANCEL_REQUEST'" class="field field--trade-ticket">
                   <span class="field__label">{{ needsLimitPrice ? 'Limit price' : 'Reference price' }}</span>
                   <input v-model.number="orderDraft.price" type="number" min="0" step="0.01" />
                 </div>
-                <div class="field field--trade-ticket" v-if="needsStopPrice">
+                <div class="field field--trade-ticket" v-if="orderDraft.messageType !== 'ORDER_CANCEL_REQUEST' && needsStopPrice">
                   <span class="field__label">Stop price</span>
                   <input v-model.number="orderDraft.stopPrice" type="number" min="0" step="0.01" />
                 </div>
+                <div class="field field--span-2">
+                  <span class="field__label">Additional FIX tags</span>
+                  <div class="button-row">
+                    <select v-model="selectedSuggestedTagKey">
+                      <option value="">Select a suggested {{ activeFixVersionLabel }} tag…</option>
+                      <option v-for="tag in availableSuggestedTags" :key="tag.tag + '-' + tag.name" :value="tag.tag + ':' + tag.name">{{ tag.tag }} · {{ tag.name }}{{ tag.type ? ' · ' + tag.type : '' }}</option>
+                    </select>
+                    <button class="button button--ghost" @click="addSuggestedTag" :disabled="!selectedSuggestedTagKey">Add suggested tag</button>
+                    <button class="button button--soft" @click="addCustomTag">Add custom FID</button>
+                  </div>
+                  <span class="field__hint">Current dictionary: {{ activeFixVersionLabel }}. Use standard FIX tags from the selected version or any custom numeric tag.</span>
+                </div>
               </div>
 
-              <div v-if="activeMode === 'bulk'" class="bulk-grid bulk-grid--comfortable" style="margin-top: 18px;">
+              <div v-if="orderDraft.additionalTags.length" class="stack" style="margin-top: 18px; gap: 12px;">
+                <div v-for="(tag, index) in orderDraft.additionalTags" :key="tag.tag + '-' + index" class="order-grid order-grid--comfortable" style="align-items: end;">
+                  <div class="field">
+                    <span class="field__label">Tag</span>
+                    <input v-model.number="tag.tag" type="number" min="1" step="1" placeholder="9001" />
+                  </div>
+                  <div class="field">
+                    <span class="field__label">Name</span>
+                    <input v-model="tag.name" placeholder="CustomFID" />
+                  </div>
+                  <div class="field field--span-2">
+                    <span class="field__label">Value</span>
+                    <input v-model="tag.value" placeholder="FIX tag value" />
+                  </div>
+                  <div class="field">
+                    <button class="button button--ghost" @click="removeAdditionalTag(index)">Remove</button>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="activeMode === 'bulk' && selectedMessageType?.supportsBulk" class="bulk-grid bulk-grid--comfortable" style="margin-top: 18px;">
                 <div class="field field--span-2">
                   <span class="field__label">Bulk mode</span>
                   <div class="segmented">
@@ -215,6 +262,18 @@ createApp({
                 </template>
               </div>
 
+              <div v-else-if="activeMode === 'bulk'" class="compact-card" style="margin-top: 18px;">
+                <p class="eyebrow">Bulk routing</p>
+                <p class="compact-card__copy">Bulk mode is available for New Order Single only. Switch the message type back to NOS to run bulk traffic.</p>
+              </div>
+
+              <div class="compact-card" style="margin-top: 18px;">
+                <p class="eyebrow">Preview summary</p>
+                <p class="compact-card__value mono">{{ preview.summary || 'Draft ready' }}</p>
+                <p class="compact-card__copy">{{ preview.routeSummary || 'Route and tag metadata will appear here.' }}</p>
+                <p class="compact-card__copy">Notional {{ preview.notional || '—' }} · {{ preview.recommendation || 'Run a preview to validate the current draft.' }}</p>
+              </div>
+
               <ul v-if="previewWarnings.length" class="warning-list" style="margin-top: 18px;">
                 <li v-for="warning in previewWarnings" :key="warning">{{ warning }}</li>
               </ul>
@@ -247,8 +306,8 @@ createApp({
                   class="button"
                   :class="session.connected ? 'button--danger' : 'button--success'"
                   @click="session.connected ? disconnectSession() : connectSession()"
-                  :disabled="busyAction === 'connect' || busyAction === 'disconnect'">
-                  {{ busyAction === 'connect' ? 'Connecting…' : busyAction === 'disconnect' ? 'Disconnecting…' : session.connected ? 'Disconnect' : 'Connect' }}
+                  :disabled="sessionActionBusy">
+                  {{ sessionButtonLabel }}
                 </button>
               </div>
             </div>
@@ -267,7 +326,7 @@ createApp({
               <span class="chip">{{ recentOrders.length }} tracked</span>
             </div>
             <div class="panel__body">
-              <div v-if="!recentOrders.length" class="empty-state">No routed orders yet. Send a ticket or start bulk flow from Order Input.</div>
+              <div v-if="!recentOrders.length" class="empty-state">No routed orders yet. Send a FIX message or start bulk NOS flow from Create FIX message.</div>
               <div v-else class="orders">
                 <div v-for="order in recentOrders" :key="order.clOrdId" class="order-row">
                   <p class="order-row__title">{{ order.side }} {{ order.quantity }} {{ order.symbol }}</p>
@@ -449,7 +508,13 @@ createApp({
       priceTypes: [],
       timeInForces: [],
       bulkModes: [],
+      messageTypes: [],
       fixVersions: []
+    })
+
+    const fixMetadata = reactive({
+      versions: [],
+      messageTypes: []
     })
 
     const settingsState = reactive({
@@ -464,6 +529,7 @@ createApp({
     const recentOrders = ref([])
     const apiStatus = ref('Connecting…')
     const busyAction = ref('')
+    const sessionActionPending = ref('')
     const refreshHandle = ref(null)
     const previewTimer = ref(null)
     const activePage = ref('order-input')
@@ -476,8 +542,12 @@ createApp({
     const suggestedSymbol = ref('AAPL')
     const selectedProfileName = ref(TheFixSessionProfileNameFallback())
     const storagePathDraft = ref('')
+    const selectedSuggestedTagKey = ref('')
 
     const orderDraft = reactive({
+      messageType: 'NEW_ORDER_SINGLE',
+      clOrdId: '',
+      origClOrdId: '',
       region: 'AMERICAS',
       market: 'XNAS',
       symbol: 'AAPL',
@@ -488,7 +558,8 @@ createApp({
       timeInForce: 'DAY',
       currency: 'USD',
       price: 100.25,
-      stopPrice: 0
+      stopPrice: 0,
+      additionalTags: []
     })
 
     const bulkDraft = reactive({
@@ -512,15 +583,31 @@ createApp({
     const priceTypes = computed(() => referenceData.priceTypes || [])
     const timeInForces = computed(() => referenceData.timeInForces || [])
     const bulkModes = computed(() => referenceData.bulkModes || [])
+    const messageTypes = computed(() => referenceData.messageTypes?.length ? referenceData.messageTypes : fixMetadata.messageTypes || [])
     const fixVersionOptions = computed(() => settingsState.fixVersionOptions || referenceData.fixVersions || [])
     const availableMarkets = computed(() => (referenceData.markets || []).filter(market => market.region === orderDraft.region))
     const selectedOrderType = computed(() => orderTypes.value.find(item => item.code === orderDraft.orderType) || null)
+    const selectedMessageType = computed(() => messageTypes.value.find(item => item.code === orderDraft.messageType) || null)
     const activeBulkMode = computed(() => bulkModes.value.find(item => item.code === bulkDraft.bulkMode) || null)
-    const needsLimitPrice = computed(() => Boolean(selectedOrderType.value?.requiresLimitPrice))
-    const needsStopPrice = computed(() => Boolean(selectedOrderType.value?.requiresStopPrice))
+    const needsLimitPrice = computed(() => orderDraft.messageType !== 'ORDER_CANCEL_REQUEST' && Boolean(selectedOrderType.value?.requiresLimitPrice))
+    const needsStopPrice = computed(() => orderDraft.messageType !== 'ORDER_CANCEL_REQUEST' && Boolean(selectedOrderType.value?.requiresStopPrice))
     const previewWarnings = computed(() => preview.warnings || [])
     const pageOptions = computed(() => PAGE_OPTIONS)
     const currentPageLabel = computed(() => pageOptions.value.find(page => page.code === activePage.value)?.label || 'Menu')
+    const activeFixVersionCode = computed(() => session.fixVersionCode || settingsDraft.fixVersionCode || 'FIX_44')
+    const activeFixVersionLabel = computed(() => fixVersionOptions.value.find(option => option.code === activeFixVersionCode.value)?.label || 'FIX 4.4')
+    const currentFixDictionary = computed(() => (fixMetadata.versions || []).find(version => version.code === activeFixVersionCode.value) || null)
+    const availableSuggestedTags = computed(() => {
+      const messageSpecific = currentFixDictionary.value?.messages?.[orderDraft.messageType] || []
+      const usedTags = new Set((orderDraft.additionalTags || []).map(tag => Number(tag.tag || 0)))
+      return messageSpecific.filter(tag => !usedTags.has(Number(tag.tag || 0)))
+    })
+    const sessionActionBusy = computed(() => sessionActionPending.value === 'connect' || sessionActionPending.value === 'disconnect')
+    const sessionButtonLabel = computed(() => {
+      if (sessionActionPending.value === 'connect') return 'Connecting…'
+      if (sessionActionPending.value === 'disconnect') return 'Disconnecting…'
+      return session.connected ? 'Disconnect' : 'Connect'
+    })
 
     const themeMediaQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null
 
@@ -569,6 +656,13 @@ createApp({
       return response.json()
     }
 
+    const applyFixMetadata = (payload) => {
+      Object.assign(fixMetadata, {
+        versions: payload?.versions || [],
+        messageTypes: payload?.messageTypes || []
+      })
+    }
+
     const regionLabel = (code) => regions.value.find(region => region.code === code)?.label || code
 
     const applyMarketDefaults = (forceSymbol = false) => {
@@ -589,6 +683,7 @@ createApp({
         ...orderDraft,
         ...(defaults.order || {})
       })
+      orderDraft.additionalTags = Array.isArray(defaults.order?.additionalTags) ? defaults.order.additionalTags : []
       if (defaults.defaultFlowRate) {
         bulkDraft.ratePerSecond = defaults.defaultFlowRate
       }
@@ -622,13 +717,21 @@ createApp({
       settingsInitialized.value = true
     }
 
-    const applyOverview = (payload, preserveSettingsDraft = true) => {
+    const applyOverview = (payload, preserveSettingsDraft = true, preservePendingSessionState = false) => {
       Object.assign(overview, {
         applicationName: payload.applicationName,
         subtitle: payload.subtitle,
         environment: payload.environment
       })
-      Object.assign(session, payload.session || {})
+      if (preservePendingSessionState && sessionActionPending.value) {
+        Object.assign(session, {
+          ...(payload.session || {}),
+          connected: session.connected,
+          status: session.status
+        })
+      } else {
+        Object.assign(session, payload.session || {})
+      }
       Object.assign(kpis, payload.kpis || {})
       Object.assign(referenceData, payload.referenceData || {})
       recentEvents.value = payload.recentEvents || []
@@ -650,7 +753,7 @@ createApp({
 
     const loadOverview = async () => {
       try {
-        applyOverview(await apiCall('/api/overview'), true)
+        applyOverview(await apiCall('/api/overview'), true, true)
       } catch (error) {
         apiStatus.value = 'Unavailable'
         recentEvents.value = [{
@@ -662,7 +765,18 @@ createApp({
       }
     }
 
+    const loadFixMetadata = async () => {
+      try {
+        applyFixMetadata(await apiCall('/api/fix-metadata'))
+      } catch (error) {
+        console.warn('Unable to load FIX metadata', error)
+      }
+    }
+
     const buildOrderPayload = () => ({
+      messageType: orderDraft.messageType,
+      clOrdId: (orderDraft.clOrdId || '').trim(),
+      origClOrdId: (orderDraft.origClOrdId || '').trim(),
       region: orderDraft.region,
       market: orderDraft.market,
       symbol: (orderDraft.symbol || '').trim(),
@@ -673,7 +787,13 @@ createApp({
       timeInForce: orderDraft.timeInForce,
       currency: (orderDraft.currency || '').trim().toUpperCase(),
       price: Number(orderDraft.price),
-      stopPrice: Number(orderDraft.stopPrice || 0)
+      stopPrice: Number(orderDraft.stopPrice || 0),
+      additionalTags: (orderDraft.additionalTags || []).map(tag => ({
+        tag: Number(tag.tag || 0),
+        name: (tag.name || '').trim(),
+        value: (tag.value || '').trim(),
+        custom: Boolean(tag.custom)
+      })).filter(tag => tag.tag || tag.name || tag.value)
     })
 
     const buildSettingsPayload = () => ({
@@ -700,6 +820,19 @@ createApp({
       }
     }
 
+    const runSessionAction = async (name, work) => {
+      if (sessionActionPending.value) {
+        return
+      }
+      sessionActionPending.value = name
+      session.status = name === 'connect' ? 'Connecting…' : 'Disconnecting…'
+      try {
+        await work()
+      } finally {
+        sessionActionPending.value = ''
+      }
+    }
+
     const previewTicket = async () => {
       const payload = await apiCall('/api/order-ticket/preview', {
         method: 'POST',
@@ -718,8 +851,15 @@ createApp({
       }, 250)
     }
 
-    const connectSession = async () => runAction('connect', async () => applyOverview(await apiCall('/api/session/connect', { method: 'POST' }), true))
-    const disconnectSession = async () => runAction('disconnect', async () => applyOverview(await apiCall('/api/session/disconnect', { method: 'POST' }), true))
+    const connectSession = async () => runSessionAction('connect', async () => runAction('connect', async () => {
+      applyOverview(await apiCall('/api/session/connect', { method: 'POST' }), true)
+    }))
+    const disconnectSession = async () => runSessionAction('disconnect', async () => runAction('disconnect', async () => {
+      if (session.autoFlowActive) {
+        applyOverview(await apiCall('/api/order-flow/stop', { method: 'POST' }), true)
+      }
+      applyOverview(await apiCall('/api/session/disconnect', { method: 'POST' }), true)
+    }))
     const pulseTest = async () => runAction('pulse', async () => applyOverview(await apiCall('/api/session/pulse-test', { method: 'POST' }), true))
 
     const sendTicket = async () => runAction('send', async () => {
@@ -795,6 +935,28 @@ createApp({
       settingsDirty.value = true
     }
 
+    const addCustomTag = () => {
+      orderDraft.additionalTags.push({ tag: '', name: '', value: '', custom: true })
+    }
+
+    const addSuggestedTag = () => {
+      if (!selectedSuggestedTagKey.value) {
+        return
+      }
+      const [tagValue, ...nameParts] = selectedSuggestedTagKey.value.split(':')
+      orderDraft.additionalTags.push({
+        tag: Number(tagValue || 0),
+        name: nameParts.join(':') || '',
+        value: '',
+        custom: false
+      })
+      selectedSuggestedTagKey.value = ''
+    }
+
+    const removeAdditionalTag = (index) => {
+      orderDraft.additionalTags.splice(index, 1)
+    }
+
     const onRegionChange = () => {
       if (!availableMarkets.value.find(market => market.code === orderDraft.market) && availableMarkets.value.length) {
         orderDraft.market = availableMarkets.value[0].code
@@ -830,6 +992,17 @@ createApp({
       schedulePreview()
     })
 
+    watch(() => orderDraft.messageType, (nextMessageType) => {
+      selectedSuggestedTagKey.value = ''
+      if (nextMessageType === 'ORDER_CANCEL_REQUEST') {
+        orderDraft.stopPrice = 0
+      }
+      if (activeMode.value === 'bulk' && nextMessageType !== 'NEW_ORDER_SINGLE') {
+        activeMode.value = 'single'
+      }
+      schedulePreview()
+    })
+
     watch(orderDraft, schedulePreview, { deep: true })
 
     onMounted(async () => {
@@ -839,6 +1012,7 @@ createApp({
         themeMediaQuery.addListener(handleSystemThemeChange)
       }
       window.addEventListener('click', closeMenu)
+      await loadFixMetadata()
       await loadOverview()
       await previewTicket()
       refreshHandle.value = window.setInterval(loadOverview, 2000)
@@ -878,15 +1052,22 @@ createApp({
       previewWarnings,
       regions,
       sides,
+      messageTypes,
       orderTypes,
       priceTypes,
       timeInForces,
       bulkModes,
+      selectedMessageType,
       fixVersionOptions,
+      activeFixVersionLabel,
+      availableSuggestedTags,
       availableMarkets,
       activeBulkMode,
       needsLimitPrice,
       needsStopPrice,
+      selectedSuggestedTagKey,
+      sessionActionBusy,
+      sessionButtonLabel,
       settingsState,
       settingsDraft,
       selectedProfileName,
@@ -905,6 +1086,9 @@ createApp({
       resetSettingsDraft,
       startNewProfile,
       markSettingsDirty,
+      addCustomTag,
+      addSuggestedTag,
+      removeAdditionalTag,
       onRegionChange,
       onMarketChange,
       toggleMenu,

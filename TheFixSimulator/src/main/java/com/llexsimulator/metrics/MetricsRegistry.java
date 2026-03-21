@@ -3,7 +3,7 @@ package com.llexsimulator.metrics;
 import org.HdrHistogram.Histogram;
 
 import java.util.Arrays;
-import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Central metrics store — all operations are lock-free and zero-GC.
@@ -32,11 +32,11 @@ public final class MetricsRegistry {
     private volatile long lastP99ns  = 0L;
 
     // ── Counters ──────────────────────────────────────────────────────────────
-    private final LongAdder ordersReceived  = new LongAdder();
-    private final LongAdder fillsSent       = new LongAdder();
-    private final LongAdder rejectsSent     = new LongAdder();
-    private final LongAdder cancelsSent     = new LongAdder();
-    private final LongAdder execReportsSent = new LongAdder();
+    private final AtomicLong ordersReceived = new AtomicLong();
+    private final AtomicLong fillsSent = new AtomicLong();
+    private final AtomicLong rejectsSent = new AtomicLong();
+    private final AtomicLong cancelsSent = new AtomicLong();
+    private final AtomicLong execReportsSent = new AtomicLong();
 
     // Pre-allocated snapshot array: [orders, execReports, fills, rejects, cancels, p50, p99, p999, max, tps]
     private final long[] snapshotBuf = new long[10];
@@ -54,10 +54,10 @@ public final class MetricsRegistry {
         throughputTracker.increment();
     }
 
-    public void incrementOrdersReceived()  { ordersReceived.increment(); }
-    public void incrementFills()           { fillsSent.increment();   execReportsSent.increment(); }
-    public void incrementRejects()         { rejectsSent.increment(); execReportsSent.increment(); }
-    public void incrementCancels()         { cancelsSent.increment(); execReportsSent.increment(); }
+    public void incrementOrdersReceived()  { ordersReceived.incrementAndGet(); }
+    public void incrementFills()           { fillsSent.incrementAndGet();   execReportsSent.incrementAndGet(); }
+    public void incrementRejects()         { rejectsSent.incrementAndGet(); execReportsSent.incrementAndGet(); }
+    public void incrementCancels()         { cancelsSent.incrementAndGet(); execReportsSent.incrementAndGet(); }
 
     // ── Snapshot (called from disruptor thread in MetricsPublishHandler) ─────
 
@@ -75,16 +75,16 @@ public final class MetricsRegistry {
             rollingWindow.reset();
         }
 
-        snapshotBuf[0] = ordersReceived.sum();
-        snapshotBuf[1] = execReportsSent.sum();
-        snapshotBuf[2] = fillsSent.sum();
-        snapshotBuf[3] = rejectsSent.sum();
-        snapshotBuf[4] = cancelsSent.sum();
+        snapshotBuf[0] = ordersReceived.get();
+        snapshotBuf[1] = execReportsSent.get();
+        snapshotBuf[2] = fillsSent.get();
+        snapshotBuf[3] = rejectsSent.get();
+        snapshotBuf[4] = cancelsSent.get();
         snapshotBuf[5] = lastP80ns;
         snapshotBuf[6] = lastP90ns;
         snapshotBuf[7] = lastP99ns;
         snapshotBuf[8] = 0L; // reserved
-        snapshotBuf[9] = throughputTracker.getPerSecond();
+        snapshotBuf[9] = throughputTracker.snapshotPerSecond();
         return snapshotBuf;
     }
 
@@ -94,21 +94,21 @@ public final class MetricsRegistry {
     public void reset() {
         rollingWindow.reset();
         lastP80ns = lastP90ns = lastP99ns = 0L;
-        ordersReceived.reset();
-        fillsSent.reset();
-        rejectsSent.reset();
-        cancelsSent.reset();
-        execReportsSent.reset();
+        ordersReceived.set(0L);
+        fillsSent.set(0L);
+        rejectsSent.set(0L);
+        cancelsSent.set(0L);
+        execReportsSent.set(0L);
         throughputTracker.reset();
         Arrays.fill(snapshotBuf, 0L);
     }
 
     // ── REST-safe accessors (volatile reads — any thread) ────────────────────
-    public long getOrdersReceived()  { return ordersReceived.sum(); }
-    public long getFillsSent()       { return fillsSent.sum(); }
-    public long getRejectsSent()     { return rejectsSent.sum(); }
-    public long getCancelsSent()     { return cancelsSent.sum(); }
-    public long getExecReportsSent() { return execReportsSent.sum(); }
+    public long getOrdersReceived()  { return ordersReceived.get(); }
+    public long getFillsSent()       { return fillsSent.get(); }
+    public long getRejectsSent()     { return rejectsSent.get(); }
+    public long getCancelsSent()     { return cancelsSent.get(); }
+    public long getExecReportsSent() { return execReportsSent.get(); }
     public long getP80Ns()           { return lastP80ns; }
     public long getP90Ns()           { return lastP90ns; }
     public long getP99Ns()           { return lastP99ns; }

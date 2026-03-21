@@ -9,6 +9,7 @@ import java.text.NumberFormat;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Currency;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -72,6 +73,7 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
     private static final Set<String> VALID_PRICE_TYPE_CODES = Set.of("PER_UNIT", "PERCENTAGE", "FIXED_AMOUNT", "YIELD", "SPREAD");
     private static final Set<String> VALID_TIME_IN_FORCE_CODES = Set.of("DAY", "IOC", "FOK", "GTC", "GTD", "OPG");
     private static final Set<String> VALID_BULK_MODE_CODES = Set.of("FIXED_RATE", "BURST");
+    private static final TheFixFixDictionaryCatalog FIX_DICTIONARY_CATALOG = new TheFixFixDictionaryCatalog();
 
     private final TheFixClientConfig config;
     private final TheFixSessionProfileStore profileStore;
@@ -137,12 +139,12 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
 
     synchronized JsonObject startOrderFlow(JsonObject request) {
         OrderPreview preview = buildPreview(request);
-        if (!preview.warnings().isEmpty()) {
+        if (!preview.warnings().isEmpty() || !preview.toOrderRequest().messageType().supportsBulk()) {
             return snapshot();
         }
         String bulkMode = sanitizeCode(request == null ? null : request.getString("bulkMode"), "FIXED_RATE");
         int requestedRate = parsePositiveInt(request, "ratePerSecond", config.defaultRatePerSecond());
-        int totalOrders = parseNonNegativeInt(request, "totalOrders", 0);
+        int totalOrders = Math.max(0, parseInt(request, "totalOrders", 0));
         int burstSize = parsePositiveInt(request, "burstSize", 10);
         int burstIntervalMs = parsePositiveInt(request, "burstIntervalMs", 1_000);
         if (!VALID_BULK_MODE_CODES.contains(bulkMode)) {
@@ -171,6 +173,10 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         return new JsonObject().put("settings", profileStore.snapshot());
     }
 
+    synchronized JsonObject fixMetadataSnapshot() {
+        return FIX_DICTIONARY_CATALOG.snapshot();
+    }
+
     synchronized JsonObject saveSettingsProfile(JsonObject request) {
         profileStore.saveProfile(request == null ? new JsonObject() : request);
         fixService.onProfileActivated();
@@ -196,55 +202,90 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
 
     private OrderPreview buildPreview(JsonObject request) {
         JsonObject effectiveRequest = request == null ? new JsonObject() : request;
+        TheFixMessageType messageType = TheFixMessageType.fromCode(effectiveRequest.getString("messageType"));
+        String clOrdId = resolveText(effectiveRequest, "clOrdId", "");
+        String origClOrdId = resolveText(effectiveRequest, "origClOrdId", "");
         String region = sanitizeCode(effectiveRequest.getString("region"), "AMERICAS");
         String market = sanitizeCode(effectiveRequest.getString("market"), "XNAS");
-        MarketDefinition selectedMarketDefinition = marketDefinition(region, market);
-        boolean validMarketSelection = selectedMarketDefinition != null;
-        MarketDefinition marketDefinition = validMarketSelection ? selectedMarketDefinition : marketDefinition("AMERICAS", "XNAS");
+        MarketDefinition marketDefinition = exactMarketDefinition(region, market);
+        if (marketDefinition == null) {
+            marketDefinition = marketDefinition("AMERICAS", "XNAS");
+        }
+        boolean requestedMarketMatched = region.equals(marketDefinition.region()) && market.equals(marketDefinition.code());
         String currency = sanitizeCode(effectiveRequest.getString("currency"), marketDefinition.currency());
         String symbol = resolveText(effectiveRequest, "symbol", defaultSymbolForMarket(marketDefinition)).toUpperCase(Locale.US);
         String side = sanitizeCode(effectiveRequest.getString("side"), "BUY");
         String timeInForce = sanitizeCode(effectiveRequest.getString("timeInForce"), "DAY");
         String orderType = sanitizeCode(effectiveRequest.getString("orderType"), "LIMIT");
         String priceType = sanitizeCode(effectiveRequest.getString("priceType"), "PER_UNIT");
-        int quantity = resolveInt(effectiveRequest, "quantity", 100);
+        int quantity = effectiveRequest.containsKey("quantity") && effectiveRequest.getValue("quantity") != null
+                ? parseInt(effectiveRequest, "quantity", 100)
+                : 100;
         double rawPrice = resolveDouble(effectiveRequest, "price", 100.25d);
         double rawStopPrice = resolveDouble(effectiveRequest, "stopPrice", 0d);
         OrderTypeDefinition orderTypeDefinition = orderTypeDefinition(orderType);
+        List<TheFixTagEntry> additionalTags = TheFixTagEntry.fromJsonArray(effectiveRequest.getJsonArray("additionalTags"));
 
         List<String> warnings = new ArrayList<>();
+        if (messageType.requiresOrigClOrdId() && origClOrdId.isBlank()) {
+            warnings.add("OrigClOrdID is required for amend and cancel messages.");
+        }
         if (symbol.isBlank()) {
             warnings.add("Symbol is required.");
         }
         if (!REGION_LABELS.containsKey(region)) {
             warnings.add("Region must be ASIA, EMEA, or AMERICAS.");
         }
-        if (!validMarketSelection) {
+        if (!requestedMarketMatched) {
             warnings.add("Select a valid market for the chosen region.");
         }
         if (!VALID_SIDE_CODES.contains(side)) {
             warnings.add("Side must be BUY, SELL, or SELL_SHORT.");
         }
-        if (!VALID_TIME_IN_FORCE_CODES.contains(timeInForce)) {
-            warnings.add("Time in force must be DAY, IOC, FOK, GTC, GTD, or OPG.");
-        }
-        if (orderTypeDefinition == null) {
-            warnings.add("Select a supported order type.");
-        }
-        if (!VALID_PRICE_TYPE_CODES.contains(priceType)) {
-            warnings.add("Select a supported price type.");
-        }
-        if (quantity <= 0) {
-            warnings.add("Quantity must be greater than zero.");
-        }
-        if (orderTypeDefinition != null && orderTypeDefinition.requiresLimitPrice() && rawPrice <= 0d) {
-            warnings.add("Limit price must be greater than zero.");
-        }
-        if (orderTypeDefinition != null && orderTypeDefinition.requiresStopPrice() && rawStopPrice <= 0d) {
-            warnings.add("Stop price must be greater than zero for stop-based orders.");
+        if (messageType == TheFixMessageType.ORDER_CANCEL_REQUEST) {
+            if (quantity < 0) {
+                warnings.add("Quantity cannot be negative.");
+            }
+        } else {
+            if (!VALID_TIME_IN_FORCE_CODES.contains(timeInForce)) {
+                warnings.add("Time in force must be DAY, IOC, FOK, GTC, GTD, or OPG.");
+            }
+            if (orderTypeDefinition == null) {
+                warnings.add("Select a supported order type.");
+            }
+            if (!VALID_PRICE_TYPE_CODES.contains(priceType)) {
+                warnings.add("Select a supported price type.");
+            }
+            if (quantity <= 0) {
+                warnings.add("Quantity must be greater than zero.");
+            }
+            if (orderTypeDefinition != null && orderTypeDefinition.requiresLimitPrice() && rawPrice <= 0d) {
+                warnings.add("Limit price must be greater than zero.");
+            }
+            if (orderTypeDefinition != null && orderTypeDefinition.requiresStopPrice() && rawStopPrice <= 0d) {
+                warnings.add("Stop price must be greater than zero for stop-based orders.");
+            }
         }
         if (!currency.matches("^[A-Z]{3}$")) {
             warnings.add("Currency must be a 3-letter ISO code.");
+        }
+
+        Set<Integer> seenAdditionalTags = new LinkedHashSet<>();
+        Set<Integer> reservedTags = reservedCoreTags(messageType);
+        for (TheFixTagEntry additionalTag : additionalTags) {
+            if (additionalTag.tag() <= 0) {
+                warnings.add("Additional FIX tags must use a positive numeric tag.");
+                continue;
+            }
+            if (!seenAdditionalTags.add(additionalTag.tag())) {
+                warnings.add("Duplicate additional FIX tag " + additionalTag.tag() + " is not allowed.");
+            }
+            if (!additionalTag.hasValue()) {
+                warnings.add("Additional FIX tag " + additionalTag.tag() + " requires a value.");
+            }
+            if (reservedTags.contains(additionalTag.tag())) {
+                warnings.add("Additional FIX tag " + additionalTag.tag() + " is already managed by the main form.");
+            }
         }
 
         BigDecimal price = BigDecimal.valueOf(Math.max(rawPrice, 0d)).setScale(2, RoundingMode.HALF_UP);
@@ -267,14 +308,29 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         boolean requiresLimitPrice = orderTypeDefinition != null && orderTypeDefinition.requiresLimitPrice();
         boolean requiresStopPrice = orderTypeDefinition != null && orderTypeDefinition.requiresStopPrice();
 
-        String summary = side + " " + quantity + " " + symbol + " · " + orderTypeLabel
-                + (requiresLimitPrice ? " @ " + price : "")
-                + (requiresStopPrice ? " / stop " + stopPrice : "")
-                + " · " + timeInForce;
-        String routeSummary = (validMarketSelection ? marketDefinition.label() + " (" + market + ')' : market)
-                + " · " + currency + " · " + priceType.replace('_', ' ');
+        String summary = switch (messageType) {
+            case ORDER_CANCEL_REQUEST -> "CANCEL " + symbol + " · orig " + (origClOrdId.isBlank() ? "?" : origClOrdId)
+                    + (quantity > 0 ? " · qty " + quantity : "");
+            case ORDER_CANCEL_REPLACE_REQUEST -> "AMEND " + side + " " + quantity + " " + symbol + " · orig "
+                    + (origClOrdId.isBlank() ? "?" : origClOrdId)
+                    + " · " + orderTypeLabel
+                    + (requiresLimitPrice ? " @ " + price : "")
+                    + (requiresStopPrice ? " / stop " + stopPrice : "")
+                    + " · " + timeInForce;
+            case NEW_ORDER_SINGLE -> side + " " + quantity + " " + symbol + " · " + orderTypeLabel
+                    + (requiresLimitPrice ? " @ " + price : "")
+                    + (requiresStopPrice ? " / stop " + stopPrice : "")
+                    + " · " + timeInForce;
+        };
+        String routeSummary = marketDefinition.label() + " (" + marketDefinition.code() + ')'
+                + " · " + currency
+                + (messageType == TheFixMessageType.ORDER_CANCEL_REQUEST ? "" : " · " + priceType.replace('_', ' '))
+                + " · +" + additionalTags.size() + " extra tags";
 
         return new OrderPreview(
+                messageType.code(),
+                clOrdId,
+                origClOrdId,
                 symbol,
                 side,
                 quantity,
@@ -288,9 +344,10 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
                 currency,
                 status,
                 summary,
-                formatNotional(notional, currency),
+                quantity > 0 && price.doubleValue() > 0d ? formatNotional(notional, currency) : "—",
                 recommendation,
                 routeSummary,
+                additionalTags,
                 warnings
         );
     }
@@ -314,6 +371,8 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         TIME_IN_FORCE_OPTIONS.forEach(option -> timeInForces.add(option.toJson()));
         JsonArray bulkModes = new JsonArray();
         BULK_MODES.forEach(option -> bulkModes.add(option.toJson()));
+        JsonArray messageTypes = new JsonArray();
+        TheFixMessageType.options().forEach(type -> messageTypes.add(type.toJson()));
         JsonArray fixVersions = new JsonArray();
         TheFixFixVersion.options().forEach(version -> fixVersions.add(version.toJson()));
 
@@ -325,12 +384,16 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
                 .put("priceTypes", priceTypes)
                 .put("timeInForces", timeInForces)
                 .put("bulkModes", bulkModes)
+                .put("messageTypes", messageTypes)
                 .put("fixVersions", fixVersions);
     }
 
     private JsonObject defaultOrderJson() {
         MarketDefinition marketDefinition = marketDefinition("AMERICAS", "XNAS");
         return new JsonObject()
+                .put("messageType", TheFixMessageType.NEW_ORDER_SINGLE.code())
+                .put("clOrdId", "")
+                .put("origClOrdId", "")
                 .put("region", "AMERICAS")
                 .put("market", "XNAS")
                 .put("currency", marketDefinition.currency())
@@ -341,7 +404,8 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
                 .put("timeInForce", "DAY")
                 .put("quantity", 100)
                 .put("price", 100.25)
-                .put("stopPrice", 0.0);
+                .put("stopPrice", 0.0)
+                .put("additionalTags", new JsonArray());
     }
 
     private static String sanitizeText(String raw, String defaultValue) {
@@ -368,11 +432,6 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         return parsed > 0 ? parsed : defaultValue;
     }
 
-    private static int parseNonNegativeInt(JsonObject request, String field, int defaultValue) {
-        int parsed = parseInt(request, field, defaultValue);
-        return Math.max(0, parsed);
-    }
-
     private static int parseInt(JsonObject request, String field, int defaultValue) {
         if (request == null) {
             return defaultValue;
@@ -391,17 +450,6 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         return defaultValue;
     }
 
-    private static int resolveInt(JsonObject request, String field, int defaultValue) {
-        if (request == null || !request.containsKey(field) || request.getValue(field) == null) {
-            return defaultValue;
-        }
-        return parseInt(request, field, defaultValue);
-    }
-
-    private static double parsePositiveDouble(JsonObject request, String field, double defaultValue) {
-        double parsed = parseDouble(request, field, defaultValue);
-        return parsed >= 0d ? parsed : defaultValue;
-    }
 
     private static double parseDouble(JsonObject request, String field, double defaultValue) {
         if (request == null) {
@@ -437,6 +485,13 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         return MARKETS.stream().filter(market -> market.code().equals(marketCode)).findFirst().orElse(null);
     }
 
+    private static MarketDefinition exactMarketDefinition(String region, String marketCode) {
+        return MARKETS.stream()
+                .filter(market -> market.region().equals(region) && market.code().equals(marketCode))
+                .findFirst()
+                .orElse(null);
+    }
+
     private static String defaultSymbolForMarket(MarketDefinition marketDefinition) {
         return marketDefinition == null || marketDefinition.symbolHints().isEmpty() ? "AAPL" : marketDefinition.symbolHints().getFirst();
     }
@@ -460,7 +515,26 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         }
     }
 
+    private static Set<Integer> reservedCoreTags(TheFixMessageType messageType) {
+        Set<Integer> reserved = new LinkedHashSet<>(Set.of(11, 15, 21, 38, 40, 41, 44, 54, 55, 59, 60, 99, 207, 423));
+        if (messageType == TheFixMessageType.ORDER_CANCEL_REQUEST) {
+            reserved.remove(21);
+            reserved.remove(40);
+            reserved.remove(44);
+            reserved.remove(59);
+            reserved.remove(99);
+            reserved.remove(423);
+        }
+        if (messageType == TheFixMessageType.NEW_ORDER_SINGLE) {
+            reserved.remove(41);
+        }
+        return reserved;
+    }
+
     private record OrderPreview(
+            String messageType,
+            String clOrdId,
+            String origClOrdId,
             String symbol,
             String side,
             int quantity,
@@ -477,10 +551,16 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
             String notional,
             String recommendation,
             String routeSummary,
+            List<TheFixTagEntry> additionalTags,
             List<String> warnings
     ) {
         JsonObject toJson(boolean connected) {
+            JsonArray tagArray = new JsonArray();
+            additionalTags.forEach(tag -> tagArray.add(tag.toJson()));
             return new JsonObject()
+                    .put("messageType", messageType)
+                    .put("clOrdId", clOrdId)
+                    .put("origClOrdId", origClOrdId)
                     .put("status", status)
                     .put("summary", summary)
                     .put("notional", notional)
@@ -497,11 +577,13 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
                     .put("price", price)
                     .put("stopPrice", stopPrice)
                     .put("timeInForce", timeInForce)
+                    .put("additionalTags", tagArray)
                     .put("warnings", new JsonArray(warnings));
         }
 
         TheFixOrderRequest toOrderRequest() {
-            return new TheFixOrderRequest(symbol, side, quantity, price, stopPrice, timeInForce, orderType, priceType, region, market, currency);
+            return new TheFixOrderRequest(messageType, clOrdId, origClOrdId, symbol, side, quantity, price, stopPrice,
+                    timeInForce, orderType, priceType, region, market, currency, additionalTags);
         }
     }
 

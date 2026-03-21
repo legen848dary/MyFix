@@ -2,10 +2,6 @@ package com.llexsimulator.disruptor;
 
 import com.llexsimulator.config.SimulatorConfig;
 import com.llexsimulator.disruptor.handler.CompositeOrderEventHandler;
-import com.llexsimulator.disruptor.handler.ExecutionReportHandler;
-import com.llexsimulator.disruptor.handler.FillStrategyHandler;
-import com.llexsimulator.disruptor.handler.MetricsPublishHandler;
-import com.llexsimulator.disruptor.handler.ValidationHandler;
 import com.llexsimulator.engine.FixConnection;
 import com.lmax.disruptor.BusySpinWaitStrategy;
 import com.lmax.disruptor.RingBuffer;
@@ -15,8 +11,6 @@ import com.lmax.disruptor.dsl.Disruptor;
 import com.lmax.disruptor.dsl.ProducerType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import uk.co.real_logic.artio.decoder.NewOrderSingleDecoder;
-import uk.co.real_logic.artio.decoder.OrderCancelRequestDecoder;
 
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -46,7 +40,15 @@ public final class DisruptorPipeline {
                 ? new BusySpinWaitStrategy()
                 : new SleepingWaitStrategy(0, 100_000L);
 
-        ThreadFactory tf = new NamedDaemonThreadFactory("disruptor-handler");
+        AtomicInteger threadCounter = new AtomicInteger(0);
+        ThreadFactory tf = runnable -> {
+            Thread thread = Thread.ofPlatform()
+                    .name("disruptor-handler-" + threadCounter.getAndIncrement())
+                    .daemon(true)
+                    .unstarted(runnable);
+            thread.setPriority(Thread.MAX_PRIORITY);
+            return thread;
+        };
 
         this.disruptor = new Disruptor<>(
                 new OrderEventFactory(),
@@ -74,35 +76,10 @@ public final class DisruptorPipeline {
         log.info("Disruptor pipeline stopped");
     }
 
-    public void publish(NewOrderSingleDecoder decoder, FixConnection connection, long arrivalNs) {
+    public void publish(Object decoder, FixConnection connection, long arrivalNs) {
         ringBuffer.publishEvent(translator, decoder, connection, arrivalNs);
     }
-
-    public void publish(OrderCancelRequestDecoder decoder, FixConnection connection, long arrivalNs) {
-        ringBuffer.publishEvent(translator, decoder, connection, arrivalNs);
-    }
-
-    public RingBuffer<OrderEvent> getRingBuffer() { return ringBuffer; }
 
     public long getRemainingCapacity() { return ringBuffer.remainingCapacity(); }
-
-    // ── Thread factory ───────────────────────────────────────────────────────
-
-    private static final class NamedDaemonThreadFactory implements ThreadFactory {
-        private final String                 prefix;
-        private final AtomicInteger          counter = new AtomicInteger(0);
-
-        NamedDaemonThreadFactory(String prefix) { this.prefix = prefix; }
-
-        @Override
-        public Thread newThread(Runnable r) {
-            Thread t = Thread.ofPlatform()
-                             .name(prefix + "-" + counter.getAndIncrement())
-                             .daemon(true)
-                             .unstarted(r);
-            t.setPriority(Thread.MAX_PRIORITY);
-            return t;
-        }
-    }
 }
 

@@ -3,9 +3,13 @@ package com.insoftu.thefix.client;
 import quickfix.field.OrdType;
 import quickfix.field.Side;
 
+import java.util.List;
 import java.util.Locale;
 
 record TheFixOrderRequest(
+        String messageTypeCode,
+        String clOrdId,
+        String origClOrdId,
         String symbol,
         String side,
         int quantity,
@@ -16,31 +20,56 @@ record TheFixOrderRequest(
         String priceType,
         String region,
         String market,
-        String currency
+        String currency,
+        List<TheFixTagEntry> additionalTags
 ) {
+    TheFixOrderRequest {
+        additionalTags = additionalTags == null ? List.of() : List.copyOf(additionalTags);
+    }
+
     String summary() {
-        StringBuilder summary = new StringBuilder(side)
-                .append(' ')
-                .append(quantity)
-                .append(' ')
-                .append(symbol)
-                .append(' ')
-                .append(orderType)
-                .append(' ')
-                .append(timeInForce);
-        if (requiresLimitPrice()) {
-            summary.append(" @ ").append(String.format(Locale.US, "%.2f", price));
+        StringBuilder summary = new StringBuilder(messageType().shortLabel()).append(" · ");
+        if (messageType().requiresOrigClOrdId() && origClOrdId != null && !origClOrdId.isBlank()) {
+            summary.append("orig ").append(origClOrdId).append(" · ");
         }
-        if (requiresStopPrice()) {
-            summary.append(" stop ").append(String.format(Locale.US, "%.2f", stopPrice));
+
+        summary.append(side).append(' ');
+        if (quantity > 0) {
+            summary.append(quantity).append(' ');
         }
+        summary.append(symbol);
+
+        if (messageType() != TheFixMessageType.ORDER_CANCEL_REQUEST) {
+            summary.append(' ').append(orderType).append(' ').append(timeInForce);
+            if (requiresLimitPrice()) {
+                summary.append(" @ ").append(String.format(Locale.US, "%.2f", price));
+            }
+            if (requiresStopPrice()) {
+                summary.append(" stop ").append(String.format(Locale.US, "%.2f", stopPrice));
+            }
+        }
+
         if (market != null && !market.isBlank()) {
             summary.append(" · ").append(market);
         }
         if (currency != null && !currency.isBlank()) {
             summary.append('/').append(currency);
         }
+        if (!additionalTags.isEmpty()) {
+            summary.append(" · +").append(additionalTags.size()).append(" tag");
+            if (additionalTags.size() != 1) {
+                summary.append('s');
+            }
+        }
         return summary.toString();
+    }
+
+    TheFixMessageType messageType() {
+        return TheFixMessageType.fromCode(messageTypeCode);
+    }
+
+    String outboundClOrdIdOr(String fallback) {
+        return clOrdId == null || clOrdId.isBlank() ? fallback : clOrdId.trim();
     }
 
     char fixSide() {
@@ -85,6 +114,9 @@ record TheFixOrderRequest(
     }
 
     boolean requiresLimitPrice() {
+        if (messageType() == TheFixMessageType.ORDER_CANCEL_REQUEST) {
+            return false;
+        }
         return switch (orderType.toUpperCase(Locale.US)) {
             case "LIMIT", "STOP_LIMIT", "LIMIT_ON_CLOSE" -> true;
             default -> false;
@@ -92,6 +124,9 @@ record TheFixOrderRequest(
     }
 
     boolean requiresStopPrice() {
+        if (messageType() == TheFixMessageType.ORDER_CANCEL_REQUEST) {
+            return false;
+        }
         return switch (orderType.toUpperCase(Locale.US)) {
             case "STOP", "STOP_LIMIT" -> true;
             default -> false;

@@ -5,6 +5,7 @@ import com.llexsimulator.sbe.*;
 import com.lmax.disruptor.EventTranslatorVararg;
 import java.util.concurrent.atomic.AtomicLong;
 import uk.co.real_logic.artio.decoder.NewOrderSingleDecoder;
+import uk.co.real_logic.artio.decoder.OrderCancelReplaceRequestDecoder;
 import uk.co.real_logic.artio.decoder.OrderCancelRequestDecoder;
 import uk.co.real_logic.artio.fields.ReadOnlyDecimalFloat;
 
@@ -56,30 +57,45 @@ public final class OrderEventTranslator implements EventTranslatorVararg<OrderEv
                .sessionConnectionId(sessionConnId)
                .arrivalTimeNs(arrivalNs);
 
-        if (decodedMessage instanceof NewOrderSingleDecoder decoder) {
-            copyCharsToBytes(decoder.clOrdID(), decoder.clOrdIDLength(), clOrdBuf, 36);
-            copyCharsToBytes(decoder.symbol(), decoder.symbolLength(), symbolBuf, 16);
-            encoder.side(mapSide(decoder.side()));
-            encoder.orderType(mapOrdType(decoder.ordType()));
-            encoder.timeInForce(decoder.hasTimeInForce()
-                    ? mapTif(decoder.timeInForce())
-                    : com.llexsimulator.sbe.TimeInForce.DAY);
-            encoder.orderQty(toScaledLong(decoder.orderQty(), 4));
-            encoder.price(decoder.hasPrice() ? toScaledLong(decoder.price(), 8) : 0L);
-            encoder.stopPx(decoder.hasStopPx() ? toScaledLong(decoder.stopPx(), 8) : 0L);
-            encoder.transactTimeNs(arrivalNs);
-        } else if (decodedMessage instanceof OrderCancelRequestDecoder decoder) {
-            copyCharsToBytes(decoder.clOrdID(), decoder.clOrdIDLength(), clOrdBuf, 36);
-            copyCharsToBytes(decoder.symbol(), decoder.symbolLength(), symbolBuf, 16);
-            encoder.side(mapSide(decoder.side()));
-            encoder.orderType(OrderType.LIMIT);
-            encoder.timeInForce(com.llexsimulator.sbe.TimeInForce.DAY);
-            encoder.orderQty(0L);
-            encoder.price(0L);
-            encoder.stopPx(0L);
-            encoder.transactTimeNs(arrivalNs);
-        } else {
-            throw new IllegalArgumentException("Unsupported FIX decoder: " + decodedMessage.getClass().getName());
+        switch (decodedMessage) {
+            case NewOrderSingleDecoder decoder -> {
+                copyCharsToBytes(decoder.clOrdID(), decoder.clOrdIDLength(), clOrdBuf, 36);
+                copyCharsToBytes(decoder.symbol(), decoder.symbolLength(), symbolBuf, 16);
+                encoder.side(mapSide(decoder.side()));
+                encoder.orderType(mapOrdType(decoder.ordType()));
+                encoder.timeInForce(decoder.hasTimeInForce()
+                        ? mapTif(decoder.timeInForce())
+                        : com.llexsimulator.sbe.TimeInForce.DAY);
+                encoder.orderQty(toScaledLong(decoder.orderQty(), 4));
+                encoder.price(decoder.hasPrice() ? toScaledLong(decoder.price(), 8) : 0L);
+                encoder.stopPx(decoder.hasStopPx() ? toScaledLong(decoder.stopPx(), 8) : 0L);
+                encoder.transactTimeNs(arrivalNs);
+            }
+            case OrderCancelReplaceRequestDecoder decoder -> {
+                copyCharsToBytes(decoder.clOrdID(), decoder.clOrdIDLength(), clOrdBuf, 36);
+                copyCharsToBytes(decoder.symbol(), decoder.symbolLength(), symbolBuf, 16);
+                encoder.side(mapSide(decoder.side()));
+                encoder.orderType(mapOrdType(decoder.ordType()));
+                encoder.timeInForce(decoder.hasTimeInForce()
+                        ? mapTif(decoder.timeInForce())
+                        : com.llexsimulator.sbe.TimeInForce.DAY);
+                encoder.orderQty(decoder.hasOrderQty() ? toScaledLong(decoder.orderQty(), 4) : 0L);
+                encoder.price(decoder.hasPrice() ? toScaledLong(decoder.price(), 8) : 0L);
+                encoder.stopPx(decoder.hasStopPx() ? toScaledLong(decoder.stopPx(), 8) : 0L);
+                encoder.transactTimeNs(arrivalNs);
+            }
+            case OrderCancelRequestDecoder decoder -> {
+                copyCharsToBytes(decoder.clOrdID(), decoder.clOrdIDLength(), clOrdBuf, 36);
+                copyCharsToBytes(decoder.symbol(), decoder.symbolLength(), symbolBuf, 16);
+                encoder.side(mapSide(decoder.side()));
+                encoder.orderType(OrderType.LIMIT);
+                encoder.timeInForce(com.llexsimulator.sbe.TimeInForce.DAY);
+                encoder.orderQty(0L);
+                encoder.price(0L);
+                encoder.stopPx(0L);
+                encoder.transactTimeNs(arrivalNs);
+            }
+            default -> throw new IllegalArgumentException("Unsupported FIX decoder: " + decodedMessage.getClass().getName());
         }
 
         encoder.putClOrdId(clOrdBuf, 0);
@@ -89,9 +105,9 @@ public final class OrderEventTranslator implements EventTranslatorVararg<OrderEv
         encoder.fixVersion(mapBeginString(connection.beginString()));
 
         // sender / target compId
-        copyStringToBytes(connection.senderCompId(), senderBuf, 16);
+        copyStringToBytes(connection.senderCompId(), senderBuf);
         encoder.putSenderCompId(senderBuf, 0);
-        copyStringToBytes(connection.targetCompId(), targetBuf, 16);
+        copyStringToBytes(connection.targetCompId(), targetBuf);
         encoder.putTargetCompId(targetBuf, 0);
 
         // Re-wrap the NOS *decoder* so downstream handlers can read the just-encoded data
@@ -140,7 +156,8 @@ public final class OrderEventTranslator implements EventTranslatorVararg<OrderEv
     }
 
     /** Copies a String into a byte[] with blank-padding (ASCII). */
-    static void copyStringToBytes(String src, byte[] dst, int len) {
+    static void copyStringToBytes(String src, byte[] dst) {
+        int len = dst.length;
         int n = Math.min(src.length(), len);
         for (int i = 0; i < n; i++)  dst[i] = (byte) src.charAt(i);
         for (int i = n; i < len; i++) dst[i] = (byte) ' ';
@@ -168,9 +185,5 @@ public final class OrderEventTranslator implements EventTranslatorVararg<OrderEv
         int delta = Math.abs(targetScale - scale);
         long factor = delta < POW10.length ? POW10[delta] : 1L;
         return scale < targetScale ? unscaled * factor : unscaled / factor;
-    }
-
-    static void fillBytes(byte[] dst, int len, byte b) {
-        for (int i = 0; i < len; i++) dst[i] = b;
     }
 }

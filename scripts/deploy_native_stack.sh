@@ -18,6 +18,7 @@ SCRIPT_NAME="$(basename "$0")"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GRADLEW_BIN="${PROJECT_ROOT}/gradlew"
 RUNTIME_PROFILE_HELPER="${PROJECT_ROOT}/TheFixSimulator/scripts/runtime_profile_common.sh"
+NATIVE_RUNTIME_TARGETS_HELPER="${PROJECT_ROOT}/scripts/native_runtime_targets.sh"
 
 DROPLET_HOST=""
 SSH_KEY_PATH=""
@@ -44,6 +45,8 @@ SIM_HEAP_XMS="512m"
 SIM_HEAP_XMX="512m"
 CLIENT_HEAP_XMS="256m"
 CLIENT_HEAP_XMX="512m"
+SIM_CPU_PINNING=""
+CLIENT_CPU_PINNING=""
 BASE_SIM_CONFIG_FILE="${PROJECT_ROOT}/TheFixSimulator/config/simulator.properties"
 GIT_COMMIT="unknown"
 
@@ -90,8 +93,8 @@ ${BOLD}Options:${RESET}
   ${GREEN}help${RESET}                        Show this help
 
 ${BOLD}Examples:${RESET}
-  ./scripts/${SCRIPT_NAME} 206.189.92.17 ~/.ssh/id_rsa_ai* root
-  ./scripts/${SCRIPT_NAME} 206.189.92.17 ~/.ssh/id_rsa_ai* root --dry-run --skip-build
+  ./scripts/${SCRIPT_NAME} ip_or_hostname private_key_path root
+  ./scripts/${SCRIPT_NAME} ip_or_hostname private_key_path root --dry-run --skip-build
 
 ${BOLD}What this script does:${RESET}
   - builds :TheFixSimulator:shadowJar and :TheFixClient:installDist locally
@@ -326,6 +329,26 @@ load_runtime_profile() {
             BASE_SIM_CONFIG_FILE="${LLEX_CONFIG_DIR}/simulator.properties"
         fi
     fi
+
+    if [[ -f "${NATIVE_RUNTIME_TARGETS_HELPER}" ]]; then
+        # shellcheck disable=SC1090
+        source "${NATIVE_RUNTIME_TARGETS_HELPER}"
+        native_runtime_targets_load
+        if [[ -n "${FIXSIM_TARGET_HEAP_XMS:-}" ]]; then
+            SIM_HEAP_XMS="${FIXSIM_TARGET_HEAP_XMS}"
+        fi
+        if [[ -n "${FIXSIM_TARGET_HEAP_XMX:-}" ]]; then
+            SIM_HEAP_XMX="${FIXSIM_TARGET_HEAP_XMX}"
+        fi
+        if [[ -n "${FIXCLIENT_TARGET_HEAP_XMS:-}" ]]; then
+            CLIENT_HEAP_XMS="${FIXCLIENT_TARGET_HEAP_XMS}"
+        fi
+        if [[ -n "${FIXCLIENT_TARGET_HEAP_XMX:-}" ]]; then
+            CLIENT_HEAP_XMX="${FIXCLIENT_TARGET_HEAP_XMX}"
+        fi
+        SIM_CPU_PINNING="${FIXSIM_TARGET_CPU_PINNING:-}"
+        CLIENT_CPU_PINNING="${FIXCLIENT_TARGET_CPU_PINNING:-}"
+    fi
 }
 
 find_latest_simulator_jar() {
@@ -359,7 +382,7 @@ build_local_artifacts() {
 prepare_staging_dir() {
     STAGING_DIR="${PROJECT_ROOT}/build/native-deploy/${RELEASE_ID}"
     rm -rf "${STAGING_DIR}"
-    mkdir -p "${STAGING_DIR}/shared/config" "${STAGING_DIR}/shared/env"
+    mkdir -p "${STAGING_DIR}/shared/bin" "${STAGING_DIR}/shared/config" "${STAGING_DIR}/shared/env" "${STAGING_DIR}/scripts"
 }
 
 write_simulator_config() {
@@ -381,10 +404,12 @@ write_env_files() {
     cat <<EOF > "${STAGING_DIR}/shared/env/simulator.env"
 SIMULATOR_LOG_DIR=${APP_DIR}/shared/logs/simulator
 JAVA_OPTS="-XX:+UseZGC -XX:+ZGenerational -Xms${SIM_HEAP_XMS} -Xmx${SIM_HEAP_XMX} -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:+PerfDisableSharedMem -Daeron.dir=${APP_DIR}/shared/state/aeron -Daeron.ipc.term.buffer.length=8388608 -Daeron.threading.mode=SHARED -Daeron.shared.idle.strategy=backoff -Dagrona.disable.bounds.checks=true"
+CPU_AFFINITY=${SIM_CPU_PINNING}
 EOF
 
     cat <<EOF > "${STAGING_DIR}/shared/env/client.env"
 JAVA_OPTS="-Xms${CLIENT_HEAP_XMS} -Xmx${CLIENT_HEAP_XMX}"
+CPU_AFFINITY=${CLIENT_CPU_PINNING}
 THEFIX_CLIENT_PORT=${CLIENT_WEB_PORT}
 THEFIX_FIX_HOST=127.0.0.1
 THEFIX_FIX_PORT=${FIX_PORT}
@@ -393,10 +418,122 @@ THEFIX_FIX_RAW_LOGGING_ENABLED=false
 EOF
 }
 
+write_shared_wrapper_scripts() {
+    cat <<'EOF' > "${STAGING_DIR}/shared/bin/run-simulator.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+APP_DIR='__APP_DIR__'
+ENV_FILE="${APP_DIR}/shared/env/simulator.env"
+if [[ -f "${ENV_FILE}" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "${ENV_FILE}"
+    set +a
+fi
+cd "${APP_DIR}/shared"
+read -r -a java_opts_arr <<< "${JAVA_OPTS:-}"
+java_cmd=("${JAVA_BIN:-/usr/bin/java}"
+    "${java_opts_arr[@]}"
+    -Dlog4j2.contextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector
+    -Dllexsim.log.dir="${SIMULATOR_LOG_DIR:-${APP_DIR}/shared/logs/simulator}"
+    -Dllexsim.log.name=llexsimulator
+    --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED
+    --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+    --add-opens=java.base/java.nio=ALL-UNNAMED
+    --add-opens=java.base/java.lang=ALL-UNNAMED
+    -jar "${APP_DIR}/current/simulator/llexsimulator.jar")
+if [[ -n "${CPU_AFFINITY:-}" ]] && command -v taskset >/dev/null 2>&1; then
+    exec taskset -c "${CPU_AFFINITY}" "${java_cmd[@]}"
+fi
+exec "${java_cmd[@]}"
+EOF
+
+    cat <<'EOF' > "${STAGING_DIR}/shared/bin/run-client.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+APP_DIR='__APP_DIR__'
+ENV_FILE="${APP_DIR}/shared/env/client.env"
+if [[ -f "${ENV_FILE}" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "${ENV_FILE}"
+    set +a
+fi
+cd "${APP_DIR}/current/client/TheFixClient"
+export JAVA_OPTS="${JAVA_OPTS:-}"
+if [[ -n "${CPU_AFFINITY:-}" ]] && command -v taskset >/dev/null 2>&1; then
+    exec taskset -c "${CPU_AFFINITY}" ./bin/TheFixClient
+fi
+exec ./bin/TheFixClient
+EOF
+
+    sed -i.bak "s|__APP_DIR__|${APP_DIR}|g" "${STAGING_DIR}/shared/bin/run-simulator.sh" "${STAGING_DIR}/shared/bin/run-client.sh"
+    rm -f "${STAGING_DIR}/shared/bin/run-simulator.sh.bak" "${STAGING_DIR}/shared/bin/run-client.sh.bak"
+    chmod 0755 "${STAGING_DIR}/shared/bin/run-simulator.sh" "${STAGING_DIR}/shared/bin/run-client.sh"
+}
+
+write_release_scripts() {
+    cat <<'EOF' > "${STAGING_DIR}/scripts/start-fixsimulator.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$(id -u)" -eq 0 ]]; then
+    exec systemctl start myfix-simulator.service
+fi
+exec sudo systemctl start myfix-simulator.service
+EOF
+
+    cat <<'EOF' > "${STAGING_DIR}/scripts/stop-fixsimulator.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$(id -u)" -eq 0 ]]; then
+    exec systemctl stop myfix-simulator.service
+fi
+exec sudo systemctl stop myfix-simulator.service
+EOF
+
+    cat <<'EOF' > "${STAGING_DIR}/scripts/start-fixclient.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$(id -u)" -eq 0 ]]; then
+    exec systemctl start myfix-client.service
+fi
+exec sudo systemctl start myfix-client.service
+EOF
+
+    cat <<'EOF' > "${STAGING_DIR}/scripts/stop-fixclient.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$(id -u)" -eq 0 ]]; then
+    exec systemctl stop myfix-client.service
+fi
+exec sudo systemctl stop myfix-client.service
+EOF
+
+    cat <<'EOF' > "${STAGING_DIR}/scripts/start-all.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"${SCRIPT_DIR}/start-fixsimulator.sh"
+"${SCRIPT_DIR}/start-fixclient.sh"
+EOF
+
+    cat <<'EOF' > "${STAGING_DIR}/scripts/stop-all.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"${SCRIPT_DIR}/stop-fixclient.sh"
+"${SCRIPT_DIR}/stop-fixsimulator.sh"
+EOF
+
+    chmod 0755 "${STAGING_DIR}/scripts/"*.sh
+}
+
 prepare_local_payload() {
     prepare_staging_dir
     write_simulator_config
     write_env_files
+    write_shared_wrapper_scripts
+    write_release_scripts
 }
 
 remote_exec() {
@@ -409,6 +546,8 @@ ensure_remote_dirs() {
 set -euo pipefail
 install -d "${APP_DIR}/releases/${RELEASE_ID}/simulator" \
            "${APP_DIR}/releases/${RELEASE_ID}/client/TheFixClient" \
+           "${APP_DIR}/releases/${RELEASE_ID}/scripts" \
+           "${APP_DIR}/shared/bin" \
            "${APP_DIR}/shared/config" \
            "${APP_DIR}/shared/env"
 EOF
@@ -435,6 +574,8 @@ upload_release_files() {
         printf 'rsync --archive --compress --human-readable --partial --no-owner --no-group %q %q:%q\n' "${STAGING_DIR}/shared/config/simulator.properties" "$(ssh_target)" "${APP_DIR}/shared/config/simulator.properties"
         printf 'rsync --archive --compress --human-readable --partial --no-owner --no-group %q %q:%q\n' "${STAGING_DIR}/shared/env/simulator.env" "$(ssh_target)" "${APP_DIR}/shared/env/simulator.env"
         printf 'rsync --archive --compress --human-readable --partial --no-owner --no-group %q %q:%q\n' "${STAGING_DIR}/shared/env/client.env" "$(ssh_target)" "${APP_DIR}/shared/env/client.env"
+        printf 'rsync --archive --compress --human-readable --partial --no-owner --no-group --delete %q %q:%q\n' "${STAGING_DIR}/shared/bin/" "$(ssh_target)" "${APP_DIR}/shared/bin/"
+        printf 'rsync --archive --compress --human-readable --partial --no-owner --no-group --delete %q %q:%q\n' "${STAGING_DIR}/scripts/" "$(ssh_target)" "${APP_DIR}/releases/${RELEASE_ID}/scripts/"
         return 0
     fi
 
@@ -452,6 +593,12 @@ upload_release_files() {
 
     info "Uploading client environment file"
     RSYNC_RSH="${ssh_rsh}" rsync "${rsync_common[@]}" "${STAGING_DIR}/shared/env/client.env" "$(ssh_target):${APP_DIR}/shared/env/client.env"
+
+    info "Uploading shared runtime wrapper scripts"
+    RSYNC_RSH="${ssh_rsh}" rsync "${rsync_common[@]}" --delete "${STAGING_DIR}/shared/bin/" "$(ssh_target):${APP_DIR}/shared/bin/"
+
+    info "Uploading release control scripts"
+    RSYNC_RSH="${ssh_rsh}" rsync "${rsync_common[@]}" --delete "${STAGING_DIR}/scripts/" "$(ssh_target):${APP_DIR}/releases/${RELEASE_ID}/scripts/"
 }
 
 build_remote_finalize_script() {
@@ -617,7 +764,7 @@ prune_old_releases() {
 
 require_root_access
 APP_GROUP="\$(id -gn "\${APP_USER}")"
-run_root chown -R "\${APP_USER}:\${APP_GROUP}" "\${APP_DIR}/releases/\${RELEASE_ID}" "\${APP_DIR}/shared/config" "\${APP_DIR}/shared/env" "\${APP_DIR}/shared/logs" "\${APP_DIR}/shared/state"
+run_root chown -R "\${APP_USER}:\${APP_GROUP}" "\${APP_DIR}/releases/\${RELEASE_ID}" "\${APP_DIR}/shared/bin" "\${APP_DIR}/shared/config" "\${APP_DIR}/shared/env" "\${APP_DIR}/shared/logs" "\${APP_DIR}/shared/state"
 run_root ln -sfn "\${APP_DIR}/releases/\${RELEASE_ID}" "\${APP_DIR}/current"
 run_root rm -f /etc/nginx/sites-enabled/default
 install_nginx_site myfix-simulator "\${SIM_HOSTNAME}" "\${SIM_WEB_PORT}"
@@ -675,6 +822,8 @@ show_plan() {
     info "FIX listener: 127.0.0.1:${FIX_PORT}"
     info "Simulator heap: ${SIM_HEAP_XMS}/${SIM_HEAP_XMX}"
     info "Client heap: ${CLIENT_HEAP_XMS}/${CLIENT_HEAP_XMX}"
+    info "Simulator CPU pinning: ${SIM_CPU_PINNING:-off}"
+    info "Client CPU pinning: ${CLIENT_CPU_PINNING:-off}"
     if [[ "${SKIP_CERTBOT}" == true ]]; then
         warn "Certbot step will be skipped"
     fi

@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./web_stack_common.sh
 source "${SCRIPT_DIR}/web_stack_common.sh"
+# shellcheck source=./native_runtime_targets.sh
+source "${SCRIPT_DIR}/native_runtime_targets.sh"
 
 if [[ "${1:-}" =~ ^(help|--help|-h)$ ]]; then
     cat << EOF
@@ -23,6 +25,7 @@ banner "Starting Web Stack (Direct JVM)"
 require_java
 require_gradle_wrapper
 source_runtime_profile_if_available
+native_runtime_targets_load
 ensure_runtime_dirs
 
 if direct_stack_running; then
@@ -34,10 +37,12 @@ fi
 
 assert_web_stack_ports_available
 
-SIMULATOR_HEAP_XMS="${LLEX_JAVA_XMS:-512m}"
-SIMULATOR_HEAP_XMX="${LLEX_JAVA_XMX:-512m}"
-CLIENT_HEAP_XMS="${THEFIX_CLIENT_JAVA_XMS:-256m}"
-CLIENT_HEAP_XMX="${THEFIX_CLIENT_JAVA_XMX:-512m}"
+SIMULATOR_HEAP_XMS="${FIXSIM_TARGET_HEAP_XMS:-${LLEX_JAVA_XMS:-512m}}"
+SIMULATOR_HEAP_XMX="${FIXSIM_TARGET_HEAP_XMX:-${LLEX_JAVA_XMX:-512m}}"
+CLIENT_HEAP_XMS="${FIXCLIENT_TARGET_HEAP_XMS:-${THEFIX_CLIENT_JAVA_XMS:-256m}}"
+CLIENT_HEAP_XMX="${FIXCLIENT_TARGET_HEAP_XMX:-${THEFIX_CLIENT_JAVA_XMX:-512m}}"
+SIMULATOR_CPU_PINNING="${FIXSIM_TARGET_CPU_PINNING:-}"
+CLIENT_CPU_PINNING="${FIXCLIENT_TARGET_CPU_PINNING:-}"
 
 SIMULATOR_ARTIO_DIR="${SIM_RUNTIME_DIR}/artio-state/data"
 SIMULATOR_AERON_DIR="${SIM_RUNTIME_DIR}/aeron"
@@ -53,7 +58,7 @@ info "Building direct-run artifacts..."
 info "Starting TheFixSimulator..."
 (
     cd "${PROJECT_ROOT}/TheFixSimulator"
-    nohup java \
+    SIMULATOR_CMD=(java \
         -Dlog4j2.contextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector \
         -Dllexsim.log.dir="${SIMULATOR_LOG_DIR}" \
         -Dllexsim.log.name=llexsimulator \
@@ -73,8 +78,12 @@ info "Starting TheFixSimulator..."
         --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
         --add-opens=java.base/java.nio=ALL-UNNAMED \
         --add-opens=java.base/java.lang=ALL-UNNAMED \
-        -jar "${PROJECT_ROOT}/TheFixSimulator/build/libs/LLExSimulator-1.0-SNAPSHOT.jar" \
-        > "${SIM_LOG_FILE}" 2>&1 &
+        -jar "${PROJECT_ROOT}/TheFixSimulator/build/libs/LLExSimulator-1.0-SNAPSHOT.jar")
+    if [[ -n "${SIMULATOR_CPU_PINNING}" ]] && command -v taskset >/dev/null 2>&1; then
+        nohup taskset -c "${SIMULATOR_CPU_PINNING}" "${SIMULATOR_CMD[@]}" > "${SIM_LOG_FILE}" 2>&1 &
+    else
+        nohup "${SIMULATOR_CMD[@]}" > "${SIM_LOG_FILE}" 2>&1 &
+    fi
     echo $! > "${SIM_PID_FILE}"
 )
 
@@ -86,14 +95,18 @@ fi
 info "Starting TheFixClient..."
 (
     cd "${PROJECT_ROOT}/TheFixClient/build/install/TheFixClient"
-    env \
+    CLIENT_ENV=(env \
         JAVA_OPTS="-Xms${CLIENT_HEAP_XMS} -Xmx${CLIENT_HEAP_XMX}" \
         THEFIX_CLIENT_PORT="${WEB_STACK_CLIENT_PORT}" \
         THEFIX_FIX_HOST="127.0.0.1" \
         THEFIX_FIX_PORT="${WEB_STACK_FIX_PORT}" \
         THEFIX_FIX_LOG_DIR="${CLIENT_QUICKFIX_LOG_DIR}" \
-        THEFIX_FIX_RAW_LOGGING_ENABLED="${THEFIX_FIX_RAW_LOGGING_ENABLED:-false}" \
-        nohup ./bin/TheFixClient > "${CLIENT_LOG_FILE}" 2>&1 &
+        THEFIX_FIX_RAW_LOGGING_ENABLED="${THEFIX_FIX_RAW_LOGGING_ENABLED:-false}")
+    if [[ -n "${CLIENT_CPU_PINNING}" ]] && command -v taskset >/dev/null 2>&1; then
+        nohup "${CLIENT_ENV[@]}" taskset -c "${CLIENT_CPU_PINNING}" ./bin/TheFixClient > "${CLIENT_LOG_FILE}" 2>&1 &
+    else
+        nohup "${CLIENT_ENV[@]}" ./bin/TheFixClient > "${CLIENT_LOG_FILE}" 2>&1 &
+    fi
     echo $! > "${CLIENT_PID_FILE}"
 )
 

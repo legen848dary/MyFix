@@ -153,9 +153,6 @@ tasks.jar {
 
 tasks.compileJava {
     dependsOn(generateSbeSources, generateArtioSources)
-    options.compilerArgs.addAll(
-        listOf("--add-opens", "java.base/sun.nio.ch=ALL-UNNAMED")
-    )
 }
 
 tasks.named<Jar>("shadowJar") {

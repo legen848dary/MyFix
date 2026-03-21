@@ -223,8 +223,9 @@ createApp({
                 <p class="text-xs text-slate-400">{{ s.beginString }} | {{ s.loggedOn ? 'LOGGED ON' : 'OFFLINE' }}</p>
               </div>
               <button @click="disconnectSession(s.sessionId)"
+                      :disabled="disconnectingSessionId === s.sessionId"
                       class="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-dark-600 transition-colors">
-                Disconnect
+                {{ disconnectingSessionId === s.sessionId ? 'Disconnecting…' : 'Disconnect' }}
               </button>
             </div>
           </div>
@@ -312,6 +313,7 @@ createApp({
     const selectedRefreshSeconds = ref(1)
     const metricsRefreshOptions = METRICS_REFRESH_OPTIONS
     const isResettingMetrics = ref(false)
+    const disconnectingSessionId = ref('')
 
     const latencyChart = ref(null)
     let   chart        = null
@@ -521,9 +523,26 @@ createApp({
     }
 
     async function disconnectSession(id) {
-      await fetch(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
-      // Disconnect is async — give Artio time to process before refreshing
-      setTimeout(fetchSessions, 1500)
+      if (disconnectingSessionId.value) return
+      disconnectingSessionId.value = id
+      try {
+        const response = await fetch(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
+        if (!response.ok) {
+          throw new Error(`Disconnect failed with status ${response.status}`)
+        }
+        // Disconnect is async — give Artio time to process before refreshing
+        setTimeout(async () => {
+          try {
+            await fetchSessions()
+          } finally {
+            disconnectingSessionId.value = ''
+          }
+        }, 1500)
+      } catch (error) {
+        disconnectingSessionId.value = ''
+        console.error('Failed to disconnect session', error)
+        alert('Failed to disconnect session. Please try again.')
+      }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -610,7 +629,7 @@ createApp({
       orders, metrics, form, behaviorTypes, rejectReasons,
       loggedOnSessionCount,
       showFillPct, showDelay, showReject, showRandomFillQty, showRandomDelay, showPriceImprovement,
-      latencyChart, selectedRefreshSeconds, metricsRefreshOptions, isResettingMetrics,
+      latencyChart, selectedRefreshSeconds, metricsRefreshOptions, isResettingMetrics, disconnectingSessionId,
       updateMetricsRefreshInterval, resetMetrics,
       activateProfile, saveAndActivate, disconnectSession, execTypeBadge
     }

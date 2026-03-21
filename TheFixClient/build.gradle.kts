@@ -18,7 +18,10 @@ dependencies {
     implementation("org.apache.logging.log4j:log4j-core:2.25.3")
     implementation("org.apache.logging.log4j:log4j-slf4j2-impl:2.25.3")
     implementation("org.quickfixj:quickfixj-core:3.0.0")
+    implementation("org.quickfixj:quickfixj-messages-fix42:3.0.0")
     implementation("org.quickfixj:quickfixj-messages-fix44:3.0.0")
+    implementation("org.quickfixj:quickfixj-messages-fix50:3.0.0")
+    implementation("org.quickfixj:quickfixj-messages-fix50sp2:3.0.0")
 
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")

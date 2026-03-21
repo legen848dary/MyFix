@@ -5,6 +5,7 @@ import io.aeron.logbuffer.ControlledFragmentHandler.Action;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import uk.co.real_logic.artio.decoder.NewOrderSingleDecoder;
+import uk.co.real_logic.artio.decoder.OrderCancelReplaceRequestDecoder;
 import uk.co.real_logic.artio.decoder.OrderCancelRequestDecoder;
 import uk.co.real_logic.artio.library.FixLibrary;
 import uk.co.real_logic.artio.library.OnMessageInfo;
@@ -23,6 +24,7 @@ public final class FixSessionApplication implements SessionAcquireHandler {
 
     private static final Logger log = LoggerFactory.getLogger(FixSessionApplication.class);
     private static final long NEW_ORDER_SINGLE_TYPE = 'D';
+    private static final long ORDER_CANCEL_REPLACE_REQUEST_TYPE = 'G';
     private static final long ORDER_CANCEL_REQUEST_TYPE = 'F';
 
     private final OrderSessionRegistry registry;
@@ -60,6 +62,7 @@ public final class FixSessionApplication implements SessionAcquireHandler {
         private final FixConnection connection;
         private final MutableAsciiBuffer asciiBuffer = new MutableAsciiBuffer();
         private final NewOrderSingleDecoder newOrderSingleDecoder = new NewOrderSingleDecoder();
+        private final OrderCancelReplaceRequestDecoder orderCancelReplaceRequestDecoder = new OrderCancelReplaceRequestDecoder();
         private final OrderCancelRequestDecoder orderCancelRequestDecoder = new OrderCancelRequestDecoder();
 
         private InboundSessionHandler(FixConnection connection) {
@@ -81,10 +84,13 @@ public final class FixSessionApplication implements SessionAcquireHandler {
 
             if (messageType == NEW_ORDER_SINGLE_TYPE) {
                 newOrderSingleDecoder.decode(asciiBuffer, offset, length);
-                pipeline.publish(newOrderSingleDecoder, connection, arrivalNs);
+                pipeline.publish((Object) newOrderSingleDecoder, connection, arrivalNs);
+            } else if (messageType == ORDER_CANCEL_REPLACE_REQUEST_TYPE) {
+                orderCancelReplaceRequestDecoder.decode(asciiBuffer, offset, length);
+                pipeline.publish((Object) orderCancelReplaceRequestDecoder, connection, arrivalNs);
             } else if (messageType == ORDER_CANCEL_REQUEST_TYPE) {
                 orderCancelRequestDecoder.decode(asciiBuffer, offset, length);
-                pipeline.publish(orderCancelRequestDecoder, connection, arrivalNs);
+                pipeline.publish((Object) orderCancelRequestDecoder, connection, arrivalNs);
             }
 
             return Action.CONTINUE;

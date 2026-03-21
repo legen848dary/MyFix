@@ -376,7 +376,7 @@ if [[ -f "\${ENV_FILE}" ]]; then
 fi
 cd "\${APP_DIR}/shared"
 read -r -a java_opts_arr <<< "\${JAVA_OPTS:-}"
-exec "\${JAVA_BIN:-/usr/bin/java}" \
+java_cmd=("\${JAVA_BIN:-/usr/bin/java}" \
     "\${java_opts_arr[@]}" \
     -Dlog4j2.contextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector \
     -Dllexsim.log.dir="\${SIMULATOR_LOG_DIR:-\${APP_DIR}/shared/logs/simulator}" \
@@ -385,7 +385,11 @@ exec "\${JAVA_BIN:-/usr/bin/java}" \
     --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
     --add-opens=java.base/java.nio=ALL-UNNAMED \
     --add-opens=java.base/java.lang=ALL-UNNAMED \
-    -jar "\${APP_DIR}/current/simulator/llexsimulator.jar"
+    -jar "\${APP_DIR}/current/simulator/llexsimulator.jar")
+if [[ -n "\${CPU_AFFINITY:-}" ]] && command -v taskset >/dev/null 2>&1; then
+    exec taskset -c "\${CPU_AFFINITY}" "\${java_cmd[@]}"
+fi
+exec "\${java_cmd[@]}"
 SIMWRAP
 
     cat <<'CLIENTWRAP' | run_root tee "\${APP_DIR}/shared/bin/run-client.sh" >/dev/null
@@ -401,6 +405,9 @@ if [[ -f "\${ENV_FILE}" ]]; then
 fi
 cd "\${APP_DIR}/current/client/TheFixClient"
 export JAVA_OPTS="\${JAVA_OPTS:-}"
+if [[ -n "\${CPU_AFFINITY:-}" ]] && command -v taskset >/dev/null 2>&1; then
+    exec taskset -c "\${CPU_AFFINITY}" ./bin/TheFixClient
+fi
 exec ./bin/TheFixClient
 CLIENTWRAP
 
@@ -463,12 +470,14 @@ write_placeholder_env_files() {
         cat <<ENV | run_root tee "\${APP_DIR}/shared/env/simulator.env" >/dev/null
 SIMULATOR_LOG_DIR=\${APP_DIR}/shared/logs/simulator
 JAVA_OPTS="-XX:+UseZGC -XX:+ZGenerational -Xms512m -Xmx512m -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:+PerfDisableSharedMem -Daeron.dir=\${APP_DIR}/shared/state/aeron -Daeron.ipc.term.buffer.length=8388608 -Daeron.threading.mode=SHARED -Daeron.shared.idle.strategy=backoff -Dagrona.disable.bounds.checks=true"
+CPU_AFFINITY=
 ENV
     fi
 
     if [[ ! -f "\${APP_DIR}/shared/env/client.env" ]]; then
         cat <<ENV | run_root tee "\${APP_DIR}/shared/env/client.env" >/dev/null
 JAVA_OPTS="-Xms256m -Xmx512m"
+CPU_AFFINITY=
 THEFIX_CLIENT_PORT=\${CLIENT_WEB_PORT}
 THEFIX_FIX_HOST=127.0.0.1
 THEFIX_FIX_PORT=\${FIX_PORT}

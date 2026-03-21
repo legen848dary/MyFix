@@ -43,6 +43,7 @@ final class TheFixClientServer {
                 .put("port", config.port())));
 
         router.get("/api/overview").handler(ctx -> writeJson(ctx.response(), workbenchState.snapshot()));
+        router.get("/api/fix-metadata").handler(ctx -> writeJson(ctx.response(), workbenchState.fixMetadataSnapshot()));
         router.get("/api/settings").handler(ctx -> writeJson(ctx.response(), workbenchState.settingsSnapshot()));
         router.post("/api/session/connect").handler(ctx -> writeJson(ctx.response(), workbenchState.connect()));
         router.post("/api/session/disconnect").handler(ctx -> writeJson(ctx.response(), workbenchState.disconnect()));

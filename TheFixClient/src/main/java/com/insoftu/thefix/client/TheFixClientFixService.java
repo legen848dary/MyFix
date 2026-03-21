@@ -7,10 +7,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import quickfix.Application;
 import quickfix.DefaultMessageFactory;
-import quickfix.DoNotSend;
 import quickfix.FieldNotFound;
 import quickfix.FileLogFactory;
-import quickfix.LogFactory;
 import quickfix.MemoryStoreFactory;
 import quickfix.Message;
 import quickfix.MessageFactory;
@@ -20,9 +18,7 @@ import quickfix.SessionID;
 import quickfix.SessionNotFound;
 import quickfix.SessionSettings;
 import quickfix.SocketInitiator;
-import quickfix.UnsupportedMessageType;
-import quickfix.IncorrectDataFormat;
-import quickfix.IncorrectTagValue;
+import quickfix.LogFactory;
 import quickfix.field.AvgPx;
 import quickfix.field.BusinessRejectReason;
 import quickfix.field.ClOrdID;
@@ -30,6 +26,7 @@ import quickfix.field.CumQty;
 import quickfix.field.Currency;
 import quickfix.field.ExecType;
 import quickfix.field.HandlInst;
+import quickfix.field.OrigClOrdID;
 import quickfix.field.LeavesQty;
 import quickfix.field.MsgType;
 import quickfix.field.OrdRejReason;
@@ -54,10 +51,12 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -144,7 +143,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     }
 
     synchronized void disconnect() {
-        stopAutoFlowInternal(false);
+        stopAutoFlowInternal(autoFlowActive);
         connectionRequested = false;
         loggedOn = false;
         connectedAt = null;
@@ -215,8 +214,8 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         stopAutoFlowInternal(true);
     }
 
-    synchronized boolean sendOrder(TheFixOrderRequest request) {
-        return sendOrderInternal(request, false, true);
+    synchronized void sendOrder(TheFixOrderRequest request) {
+        sendOrderInternal(request, false, true);
     }
 
     synchronized JsonObject sessionSnapshot() {
@@ -280,25 +279,6 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         return loggedOn;
     }
 
-    synchronized boolean awaitLogon(Duration timeout) throws InterruptedException {
-        long deadline = System.nanoTime() + timeout.toNanos();
-        while (System.nanoTime() < deadline) {
-            if (loggedOn) {
-                return true;
-            }
-            Thread.sleep(100L);
-        }
-        return loggedOn;
-    }
-
-    synchronized long execReportCountValue() {
-        return execReportCount.get();
-    }
-
-    synchronized long sentCountValue() {
-        return sentCount.get();
-    }
-
     @Override
     public synchronized void onCreate(SessionID sessionId) {
         addEvent("INFO", "Session created", sessionId.toString());
@@ -333,12 +313,12 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     }
 
     @Override
-    public void toApp(Message message, SessionID sessionId) throws DoNotSend {
+    public void toApp(Message message, SessionID sessionId) {
         log.debug("toApp session={} type={} raw={}", sessionId, safeMessageType(message), printable(message));
     }
 
     @Override
-    public synchronized void fromApp(Message message, SessionID sessionId) throws FieldNotFound, IncorrectDataFormat, IncorrectTagValue, UnsupportedMessageType {
+    public synchronized void fromApp(Message message, SessionID sessionId) throws FieldNotFound {
         String messageType = message.getHeader().getString(MsgType.FIELD);
         switch (messageType) {
             case MsgType.EXECUTION_REPORT -> handleExecutionReport(message);
@@ -395,30 +375,27 @@ final class TheFixClientFixService implements Application, AutoCloseable {
                 return false;
             }
             sendFailureCount.incrementAndGet();
-            if (!autoFlowOrder) {
-                addEvent("WARN", "Order blocked", "No active FIX session is logged on. Prime the session first.");
-            }
+            addEvent("WARN", "Order blocked", "No active FIX session is logged on. Prime the session first.");
             return false;
         }
 
-        Session session = Session.lookupSession(sessionId);
-        if (session == null || !session.isLoggedOn()) {
+        @SuppressWarnings("resource")
+        Session quickFixSession = Session.lookupSession(sessionId);
+        if (quickFixSession == null || !quickFixSession.isLoggedOn()) {
             if (autoFlowOrder) {
                 return false;
             }
             sendFailureCount.incrementAndGet();
-            if (!autoFlowOrder) {
-                addEvent("WARN", "Order blocked", "QuickFIX/J session is not logged on yet.");
-            }
+            addEvent("WARN", "Order blocked", "QuickFIX/J session is not logged on yet.");
             return false;
         }
 
-        String clOrdId = nextClOrdId(autoFlowOrder ? "AUTO" : "WEB");
+        String clOrdId = request.outboundClOrdIdOr(nextClOrdId(autoFlowOrder ? "AUTO" : request.messageType().shortLabel()));
         OrderView orderView = OrderView.submitted(clOrdId, request, autoFlowOrder);
         rememberOrder(orderView);
 
         try {
-            boolean sent = Session.sendToTarget(buildNewOrderSingle(clOrdId, request), sessionId);
+            boolean sent = Session.sendToTarget(buildOutboundMessage(clOrdId, request), sessionId);
             if (!sent) {
                 sendFailureCount.incrementAndGet();
                 orderView.markFailure("SEND_FAILED", "QuickFIX/J returned false while sending to target.");
@@ -577,31 +554,90 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         return settings;
     }
 
-    private Message buildNewOrderSingle(String clOrdId, TheFixOrderRequest request) {
+    private Message buildOutboundMessage(String clOrdId, TheFixOrderRequest request) {
         Message order = new Message();
-        order.getHeader().setString(MsgType.FIELD, MsgType.NEW_ORDER_SINGLE);
+        order.getHeader().setString(MsgType.FIELD, request.messageType().msgType());
         order.setField(new ClOrdID(clOrdId));
+        order.setField(new Symbol(request.symbol()));
         order.setField(new Side(request.fixSide()));
         order.setField(new TransactTime(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)));
-        order.setField(new OrdType(request.fixOrdType()));
-        order.setField(new HandlInst(HandlInst.AUTOMATED_EXECUTION_NO_INTERVENTION));
-        order.setField(new Symbol(request.symbol()));
-        order.setField(new OrderQty(request.quantity()));
-        order.setField(new TimeInForce(request.fixTimeInForce()));
-        order.setField(new PriceType(request.fixPriceType()));
+
         if (!request.market().isBlank()) {
             order.setField(new SecurityExchange(request.market()));
         }
         if (!request.currency().isBlank()) {
             order.setField(new Currency(request.currency()));
         }
+
+        switch (request.messageType()) {
+            case NEW_ORDER_SINGLE -> populateNewOrderSingle(order, request);
+            case ORDER_CANCEL_REPLACE_REQUEST -> populateCancelReplace(order, request);
+            case ORDER_CANCEL_REQUEST -> populateCancelRequest(order, request);
+        }
+
+        applyAdditionalTags(order, request);
+        return order;
+    }
+
+    private static void populateNewOrderSingle(Message order, TheFixOrderRequest request) {
+        order.setField(new OrdType(request.fixOrdType()));
+        order.setField(new HandlInst(HandlInst.AUTOMATED_EXECUTION_NO_INTERVENTION));
+        order.setField(new OrderQty(request.quantity()));
+        order.setField(new TimeInForce(request.fixTimeInForce()));
+        order.setField(new PriceType(request.fixPriceType()));
         if (request.requiresLimitPrice()) {
             order.setField(new Price(request.price()));
         }
         if (request.requiresStopPrice()) {
             order.setField(new StopPx(request.stopPrice()));
         }
-        return order;
+    }
+
+    private static void populateCancelReplace(Message order, TheFixOrderRequest request) {
+        order.setField(new OrigClOrdID(request.origClOrdId()));
+        order.setField(new OrdType(request.fixOrdType()));
+        order.setField(new OrderQty(request.quantity()));
+        order.setField(new TimeInForce(request.fixTimeInForce()));
+        order.setField(new PriceType(request.fixPriceType()));
+        if (request.requiresLimitPrice()) {
+            order.setField(new Price(request.price()));
+        }
+        if (request.requiresStopPrice()) {
+            order.setField(new StopPx(request.stopPrice()));
+        }
+    }
+
+    private static void populateCancelRequest(Message order, TheFixOrderRequest request) {
+        order.setField(new OrigClOrdID(request.origClOrdId()));
+        if (request.quantity() > 0) {
+            order.setField(new OrderQty(request.quantity()));
+        }
+    }
+
+    private static void applyAdditionalTags(Message order, TheFixOrderRequest request) {
+        Set<Integer> reservedTags = reservedTagsFor(request.messageType());
+        for (TheFixTagEntry additionalTag : request.additionalTags()) {
+            if (additionalTag.tag() <= 0 || !additionalTag.hasValue() || reservedTags.contains(additionalTag.tag())) {
+                continue;
+            }
+            order.setString(additionalTag.tag(), additionalTag.value());
+        }
+    }
+
+    private static Set<Integer> reservedTagsFor(TheFixMessageType messageType) {
+        Set<Integer> reserved = new HashSet<>(Set.of(11, 15, 21, 35, 38, 40, 41, 44, 54, 55, 59, 60, 99, 207, 423));
+        if (messageType == TheFixMessageType.ORDER_CANCEL_REQUEST) {
+            reserved.remove(21);
+            reserved.remove(40);
+            reserved.remove(44);
+            reserved.remove(59);
+            reserved.remove(99);
+            reserved.remove(423);
+        }
+        if (messageType == TheFixMessageType.NEW_ORDER_SINGLE) {
+            reserved.remove(41);
+        }
+        return reserved;
     }
 
     private String nextClOrdId(String prefix) {
@@ -693,6 +729,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         private final String clOrdId;
         private final String symbol;
         private final String side;
+        private final String messageType;
         private final boolean autoFlow;
         private final Instant createdAt;
         private final int quantity;
@@ -705,22 +742,23 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         private double leavesQty;
         private double avgPx;
 
-        private OrderView(String clOrdId, String symbol, String side, int quantity, double limitPrice, boolean autoFlow) {
+        private OrderView(String clOrdId, String symbol, String side, String messageType, int quantity, double limitPrice, boolean autoFlow) {
             this.clOrdId = clOrdId;
             this.symbol = symbol;
             this.side = side;
+            this.messageType = messageType;
             this.quantity = quantity;
             this.limitPrice = limitPrice;
             this.autoFlow = autoFlow;
             this.createdAt = Instant.now();
             this.status = "Pending";
             this.execType = "Pending";
-            this.note = autoFlow ? "Auto flow" : "Manual ticket";
+            this.note = autoFlow ? "Auto flow " + messageType : messageType;
             this.leavesQty = quantity;
         }
 
         static OrderView submitted(String clOrdId, TheFixOrderRequest request, boolean autoFlow) {
-            return new OrderView(clOrdId, request.symbol(), request.side(), request.quantity(), request.price(), autoFlow);
+            return new OrderView(clOrdId, request.symbol(), request.side(), request.messageType().shortLabel(), request.quantity(), request.price(), autoFlow);
         }
 
         static OrderView fromExecution(Message message) {
@@ -728,6 +766,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
                     safeString(message, ClOrdID.FIELD, "UNKNOWN"),
                     safeString(message, Symbol.FIELD, "UNKNOWN"),
                     sideLabel(safeString(message, Side.FIELD, "1")),
+                    "EXEC",
                     (int) Math.round(safeDouble(message, OrderQty.FIELD, 0d)),
                     safeDouble(message, Price.FIELD, 0d),
                     false
@@ -735,13 +774,13 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         }
 
         static OrderView rejected(String clOrdId) {
-            return new OrderView(clOrdId, "UNKNOWN", "BUY", 0, 0d, false);
+            return new OrderView(clOrdId, "UNKNOWN", "BUY", "REJECT", 0, 0d, false);
         }
 
         void markSent() {
             this.status = "Sent";
             this.execType = "Pending";
-            this.note = autoFlow ? "Awaiting simulator fill" : "Manually submitted";
+            this.note = autoFlow ? "Awaiting simulator fill" : "Submitted " + messageType;
         }
 
         void markFailure(String status, String reason) {
@@ -774,6 +813,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
             return new JsonObject()
                     .put("time", EVENT_TIME_FORMAT.format(createdAt))
                     .put("clOrdId", clOrdId)
+                    .put("messageType", messageType)
                     .put("symbol", symbol)
                     .put("side", side)
                     .put("quantity", quantity)

@@ -58,6 +58,8 @@ class TheFixClientWorkbenchStateTest {
         assertFalse(referenceData.getJsonArray("markets").isEmpty());
         assertFalse(referenceData.getJsonArray("orderTypes").isEmpty());
         assertFalse(referenceData.getJsonArray("priceTypes").isEmpty());
+        assertFalse(referenceData.getJsonArray("messageTypes").isEmpty());
+        assertTrue(referenceData.getJsonArray("fixVersions").encode().contains("FIX_52"));
         state.close();
     }
 
@@ -102,6 +104,49 @@ class TheFixClientWorkbenchStateTest {
 
         assertEquals("INVALID", preview.getString("status"));
         assertTrue(preview.getJsonArray("warnings").encode().contains("Stop price"));
+        state.close();
+    }
+
+    @Test
+    void previewCancelMessagesRequireOrigClOrdId() {
+        TheFixClientWorkbenchState state = createState();
+
+        JsonObject preview = state.previewOrder(new JsonObject()
+                .put("messageType", "ORDER_CANCEL_REQUEST")
+                .put("region", "AMERICAS")
+                .put("market", "XNAS")
+                .put("symbol", "AAPL")
+                .put("side", "SELL")
+                .put("quantity", 0)
+                .put("currency", "USD"));
+
+        assertEquals("INVALID", preview.getString("status"));
+        assertTrue(preview.getJsonArray("warnings").encode().contains("OrigClOrdID"));
+        state.close();
+    }
+
+    @Test
+    void previewRejectsDuplicateAdditionalTags() {
+        TheFixClientWorkbenchState state = createState();
+
+        JsonObject preview = state.previewOrder(new JsonObject()
+                .put("messageType", "NEW_ORDER_SINGLE")
+                .put("region", "AMERICAS")
+                .put("market", "XNAS")
+                .put("symbol", "AAPL")
+                .put("side", "BUY")
+                .put("quantity", 10)
+                .put("orderType", "LIMIT")
+                .put("priceType", "PER_UNIT")
+                .put("timeInForce", "DAY")
+                .put("currency", "USD")
+                .put("price", 100.10)
+                .put("additionalTags", new io.vertx.core.json.JsonArray()
+                        .add(new JsonObject().put("tag", 9001).put("name", "ClientAlgo").put("value", "A"))
+                        .add(new JsonObject().put("tag", 9001).put("name", "ClientAlgo").put("value", "B"))));
+
+        assertEquals("INVALID", preview.getString("status"));
+        assertTrue(preview.getJsonArray("warnings").encode().contains("Duplicate additional FIX tag 9001"));
         state.close();
     }
 
