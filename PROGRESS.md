@@ -53,6 +53,10 @@ Verified on: 2026-03-21
   - `GET http://localhost:8081/api/health`
   - `GET http://localhost:8081/api/overview`
   - `./scripts/stop_web_stack.sh`
+- Combined status helper green via:
+  - `./scripts/status_web_stack.sh` when both stacks are stopped
+  - `./scripts/status_web_stack.sh` when the Docker web stack is running
+  - `./scripts/status_web_stack.sh` when the direct JVM web stack is running
 
 ### Important fix landed during verification
 
@@ -155,6 +159,8 @@ What was done:
 - Added one-command direct JVM lifecycle scripts:
   - `scripts/start_web_stack.sh`
   - `scripts/stop_web_stack.sh`
+- Added a one-command status helper:
+  - `scripts/status_web_stack.sh`
 - Added idempotent start behavior and clean stop behavior for both modes
 - Kept the terminal demo FIX client outside the default web stack and available only as an explicit opt-in path
 
@@ -167,6 +173,7 @@ Key files:
 - `scripts/stop_web_stack_docker.sh`
 - `scripts/start_web_stack.sh`
 - `scripts/stop_web_stack.sh`
+- `scripts/status_web_stack.sh`
 
 ## Verified behavior to preserve
 
@@ -192,9 +199,11 @@ Key files:
 ### Combined web stack commands
 - Docker:
   - `./scripts/start_web_stack_docker.sh`
+  - `./scripts/status_web_stack.sh`
   - `./scripts/stop_web_stack_docker.sh`
 - Direct JVM:
   - `./scripts/start_web_stack.sh`
+  - `./scripts/status_web_stack.sh`
   - `./scripts/stop_web_stack.sh`
 - Optional terminal demo FIX client:
   - `cd TheFixSimulator && ./scripts/local_fix_demo_client.sh start 50`
@@ -285,6 +294,7 @@ curl -sf http://localhost:8080/api/sessions
 ```bash
 cd "/Users/debjyotisarkar/IdeaProjects/MyFix"
 ./scripts/start_web_stack_docker.sh
+./scripts/status_web_stack.sh
 curl -sf http://localhost:8080/api/health
 curl -sf http://localhost:8081/api/health
 curl -sf -X POST http://localhost:8081/api/session/connect
@@ -295,6 +305,7 @@ curl -sf -X POST http://localhost:8081/api/session/connect
 ```bash
 cd "/Users/debjyotisarkar/IdeaProjects/MyFix"
 ./scripts/start_web_stack.sh
+./scripts/status_web_stack.sh
 curl -sf http://localhost:8080/api/health
 curl -sf http://localhost:8081/api/health
 ./scripts/stop_web_stack.sh

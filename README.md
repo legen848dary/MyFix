@@ -49,6 +49,7 @@
 
 ```bash
 ./scripts/start_web_stack_docker.sh
+./scripts/status_web_stack.sh
 ./scripts/stop_web_stack_docker.sh
 ```
 
@@ -61,10 +62,13 @@ This starts/stops:
 
 ```bash
 ./scripts/start_web_stack.sh
+./scripts/status_web_stack.sh
 ./scripts/stop_web_stack.sh
 ```
 
 This builds the required artifacts and runs both apps directly on the host JVM.
+
+`./scripts/status_web_stack.sh` reports the current Docker and direct-JVM stack state, including health endpoints, ports, pid/container ownership, and log locations.
 
 ### Optional terminal demo FIX client
 

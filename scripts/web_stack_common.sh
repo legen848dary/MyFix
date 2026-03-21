@@ -78,6 +78,13 @@ ensure_runtime_dirs() {
     mkdir -p "${PID_DIR}" "${LOG_DIR}" "${SIM_RUNTIME_DIR}" "${CLIENT_RUNTIME_DIR}"
 }
 
+read_pid_file() {
+    local pid_file="$1"
+    if [[ -f "${pid_file}" ]]; then
+        tr -d '[:space:]' < "${pid_file}"
+    fi
+}
+
 source_runtime_profile_if_available() {
     if [[ -f "${RUNTIME_PROFILE_HELPER}" ]]; then
         # shellcheck disable=SC1090
@@ -93,6 +100,48 @@ source_runtime_profile_if_available() {
 is_pid_running() {
     local pid="$1"
     [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null
+}
+
+http_healthy() {
+    local url="$1"
+    command -v curl >/dev/null 2>&1 && curl -sf "${url}" >/dev/null 2>&1
+}
+
+docker_available() {
+    command -v docker >/dev/null 2>&1
+}
+
+docker_daemon_running() {
+    docker_available && docker info >/dev/null 2>&1
+}
+
+docker_container_name() {
+    local service="$1"
+    printf '%s-%s-1\n' "${COMPOSE_PROJECT_NAME}" "${service}"
+}
+
+docker_container_id() {
+    local service="$1"
+    local container_name
+    container_name="$(docker_container_name "${service}")"
+    docker ps -aq -f "name=^/${container_name}$" 2>/dev/null | head -n 1 || true
+}
+
+docker_container_running() {
+    local service="$1"
+    local container_id
+    container_id="$(docker_container_id "${service}")"
+    [[ -n "${container_id}" ]] && [[ "$(docker inspect -f '{{.State.Running}}' "${container_id}" 2>/dev/null || true)" == "true" ]]
+}
+
+docker_container_health() {
+    local service="$1"
+    local container_id
+    container_id="$(docker_container_id "${service}")"
+    if [[ -z "${container_id}" ]]; then
+        return 0
+    fi
+    docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${container_id}" 2>/dev/null || true
 }
 
 port_listener_pid() {
@@ -183,12 +232,12 @@ direct_stack_running() {
     local sim_pid=""
     local client_pid=""
 
-    [[ -f "${SIM_PID_FILE}" ]] && sim_pid="$(tr -d '[:space:]' < "${SIM_PID_FILE}")"
-    [[ -f "${CLIENT_PID_FILE}" ]] && client_pid="$(tr -d '[:space:]' < "${CLIENT_PID_FILE}")"
+    sim_pid="$(read_pid_file "${SIM_PID_FILE}")"
+    client_pid="$(read_pid_file "${CLIENT_PID_FILE}")"
 
     is_pid_running "${sim_pid}" && is_pid_running "${client_pid}" && \
-        curl -sf "http://localhost:${WEB_STACK_SIM_WEB_PORT}/api/health" >/dev/null 2>&1 && \
-        curl -sf "http://localhost:${WEB_STACK_CLIENT_PORT}/api/health" >/dev/null 2>&1
+        http_healthy "http://localhost:${WEB_STACK_SIM_WEB_PORT}/api/health" && \
+        http_healthy "http://localhost:${WEB_STACK_CLIENT_PORT}/api/health"
 }
 
 docker_stack_running() {
@@ -197,8 +246,8 @@ docker_stack_running() {
 
     grep -qx "llexsimulator" <<< "${running_services}" && \
         grep -qx "thefixclient" <<< "${running_services}" && \
-        curl -sf "http://localhost:${WEB_STACK_SIM_WEB_PORT}/api/health" >/dev/null 2>&1 && \
-        curl -sf "http://localhost:${WEB_STACK_CLIENT_PORT}/api/health" >/dev/null 2>&1
+        http_healthy "http://localhost:${WEB_STACK_SIM_WEB_PORT}/api/health" && \
+        http_healthy "http://localhost:${WEB_STACK_CLIENT_PORT}/api/health"
 }
 
 assert_web_stack_ports_available() {
