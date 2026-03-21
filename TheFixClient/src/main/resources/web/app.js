@@ -68,6 +68,39 @@ createApp({
 
       <main v-if="activePage === 'order-input'" class="page-grid">
         <section class="stack">
+          <article class="panel panel--compact panel--metrics">
+            <div class="panel__header panel__header--metrics">
+              <div>
+                <h2 class="panel__title">Live metrics</h2>
+              </div>
+              <span class="chip">{{ session.connected ? 'Live' : 'Standby' }}</span>
+            </div>
+            <div class="panel__body panel__body--metrics">
+              <div class="metrics-strip metrics-strip--compact">
+                <div class="compact-card compact-card--metric-tile">
+                  <p class="eyebrow">Ready</p>
+                  <p class="compact-card__value">{{ kpis.readyState }}</p>
+                  <p class="compact-card__copy">{{ kpis.sessionUptime }}</p>
+                </div>
+                <div class="compact-card compact-card--metric-tile">
+                  <p class="eyebrow">Sent</p>
+                  <p class="compact-card__value">{{ kpis.sentOrders }}</p>
+                  <p class="compact-card__copy">Orders</p>
+                </div>
+                <div class="compact-card compact-card--metric-tile">
+                  <p class="eyebrow">Exec</p>
+                  <p class="compact-card__value">{{ kpis.executionReports }}</p>
+                  <p class="compact-card__copy">Reports</p>
+                </div>
+                <div class="compact-card compact-card--metric-tile">
+                  <p class="eyebrow">Reject / fail</p>
+                  <p class="compact-card__value">{{ kpis.rejects }} / {{ kpis.sendFailures }}</p>
+                  <p class="compact-card__copy">Count</p>
+                </div>
+              </div>
+            </div>
+          </article>
+
           <article class="panel panel--focus">
             <div class="panel__header">
               <div>
@@ -189,39 +222,6 @@ createApp({
               <ul v-if="previewWarnings.length" class="warning-list" style="margin-top: 18px;">
                 <li v-for="warning in previewWarnings" :key="warning">{{ warning }}</li>
               </ul>
-            </div>
-          </article>
-
-          <article class="panel panel--compact">
-            <div class="panel__header">
-              <div>
-                <h2 class="panel__title">Live metrics</h2>
-                <p class="panel__copy">Session readiness and order-routing KPIs across the active workstation.</p>
-              </div>
-            </div>
-            <div class="panel__body">
-              <div class="metrics-strip">
-                <div class="compact-card">
-                  <p class="eyebrow">Ready state</p>
-                  <p class="compact-card__value">{{ kpis.readyState }}</p>
-                  <p class="compact-card__copy">{{ kpis.sessionUptime }}</p>
-                </div>
-                <div class="compact-card">
-                  <p class="eyebrow">Orders sent</p>
-                  <p class="compact-card__value">{{ kpis.sentOrders }}</p>
-                  <p class="compact-card__copy">Accepted NewOrderSingle submissions.</p>
-                </div>
-                <div class="compact-card">
-                  <p class="eyebrow">Exec reports</p>
-                  <p class="compact-card__value">{{ kpis.executionReports }}</p>
-                  <p class="compact-card__copy">Inbound acknowledgements.</p>
-                </div>
-                <div class="compact-card">
-                  <p class="eyebrow">Rejects / failures</p>
-                  <p class="compact-card__value">{{ kpis.rejects }} / {{ kpis.sendFailures }}</p>
-                  <p class="compact-card__copy">Business rejects and send failures.</p>
-                </div>
-              </div>
             </div>
           </article>
         </section>

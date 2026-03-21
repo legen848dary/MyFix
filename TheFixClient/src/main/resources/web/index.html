@@ -354,6 +354,16 @@
       padding-top: 16px;
     }
 
+    .panel--metrics .panel__header {
+      padding: 14px 18px 0;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .panel--metrics .panel__body {
+      padding: 12px 18px 16px;
+    }
+
     .panel--subtle {
       border-radius: var(--radius-lg);
       border-color: var(--border);
@@ -380,6 +390,10 @@
     }
     .panel__body {
       padding: 22px 24px 24px;
+    }
+
+    .panel__body--metrics {
+      padding-top: 12px;
     }
 
     .hero-grid,
@@ -412,6 +426,11 @@
       grid-template-columns: repeat(4, minmax(0, 1fr));
     }
 
+    .metrics-strip--compact {
+      gap: 10px;
+      align-items: stretch;
+    }
+
     .metric,
     .summary-card,
     .session-stat,
@@ -440,6 +459,11 @@
       min-width: 0;
     }
 
+    .compact-card--metric-tile {
+      padding: 10px 12px;
+      border-radius: 14px;
+    }
+
     .compact-card__value {
       margin: 8px 0 0;
       font-size: 18px;
@@ -447,11 +471,23 @@
       line-height: 1.35;
     }
 
+    .compact-card--metric-tile .compact-card__value {
+      margin-top: 4px;
+      font-size: 16px;
+      line-height: 1.2;
+    }
+
     .compact-card__copy {
       margin: 6px 0 0;
       font-size: 12px;
       color: var(--text-soft);
       line-height: 1.45;
+    }
+
+    .compact-card--metric-tile .compact-card__copy {
+      margin-top: 2px;
+      font-size: 11px;
+      line-height: 1.2;
     }
 
     .compact-actions {
@@ -678,6 +714,11 @@
       color: var(--text-soft);
     }
 
+    .compact-card--metric-tile .eyebrow {
+      font-size: 10px;
+      letter-spacing: 0.14em;
+    }
+
     .metrics-strip--stacked {
       grid-template-columns: 1fr;
     }
@@ -815,7 +856,7 @@
 </head>
 <body data-theme="dark">
   <div id="app"></div>
-  <script type="module" src="app.js?v=20260321-8"></script>
+  <script type="module" src="app.js?v=20260321-9"></script>
 </body>
 </html>
 
