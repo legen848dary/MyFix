@@ -191,6 +191,39 @@ createApp({
               </ul>
             </div>
           </article>
+
+          <article class="panel panel--compact">
+            <div class="panel__header">
+              <div>
+                <h2 class="panel__title">Live metrics</h2>
+                <p class="panel__copy">Session readiness and order-routing KPIs across the active workstation.</p>
+              </div>
+            </div>
+            <div class="panel__body">
+              <div class="metrics-strip">
+                <div class="compact-card">
+                  <p class="eyebrow">Ready state</p>
+                  <p class="compact-card__value">{{ kpis.readyState }}</p>
+                  <p class="compact-card__copy">{{ kpis.sessionUptime }}</p>
+                </div>
+                <div class="compact-card">
+                  <p class="eyebrow">Orders sent</p>
+                  <p class="compact-card__value">{{ kpis.sentOrders }}</p>
+                  <p class="compact-card__copy">Accepted NewOrderSingle submissions.</p>
+                </div>
+                <div class="compact-card">
+                  <p class="eyebrow">Exec reports</p>
+                  <p class="compact-card__value">{{ kpis.executionReports }}</p>
+                  <p class="compact-card__copy">Inbound acknowledgements.</p>
+                </div>
+                <div class="compact-card">
+                  <p class="eyebrow">Rejects / failures</p>
+                  <p class="compact-card__value">{{ kpis.rejects }} / {{ kpis.sendFailures }}</p>
+                  <p class="compact-card__copy">Business rejects and send failures.</p>
+                </div>
+              </div>
+            </div>
+          </article>
         </section>
 
         <aside class="stack">
@@ -221,39 +254,6 @@ createApp({
                   :disabled="busyAction === 'connect' || busyAction === 'disconnect'">
                   {{ busyAction === 'connect' ? 'Connecting…' : busyAction === 'disconnect' ? 'Disconnecting…' : session.connected ? 'Disconnect' : 'Connect' }}
                 </button>
-              </div>
-            </div>
-          </article>
-
-          <article class="panel panel--compact">
-            <div class="panel__header">
-              <div>
-                <h2 class="panel__title">Live metrics</h2>
-                <p class="panel__copy">Session readiness and order-routing KPIs.</p>
-              </div>
-            </div>
-            <div class="panel__body">
-              <div class="metrics-strip metrics-strip--stacked">
-                <div class="compact-card">
-                  <p class="eyebrow">Ready state</p>
-                  <p class="compact-card__value">{{ kpis.readyState }}</p>
-                  <p class="compact-card__copy">{{ kpis.sessionUptime }}</p>
-                </div>
-                <div class="compact-card">
-                  <p class="eyebrow">Orders sent</p>
-                  <p class="compact-card__value">{{ kpis.sentOrders }}</p>
-                  <p class="compact-card__copy">Accepted NewOrderSingle submissions.</p>
-                </div>
-                <div class="compact-card">
-                  <p class="eyebrow">Exec reports</p>
-                  <p class="compact-card__value">{{ kpis.executionReports }}</p>
-                  <p class="compact-card__copy">Inbound acknowledgements.</p>
-                </div>
-                <div class="compact-card">
-                  <p class="eyebrow">Rejects / failures</p>
-                  <p class="compact-card__value">{{ kpis.rejects }} / {{ kpis.sendFailures }}</p>
-                  <p class="compact-card__copy">Business rejects and send failures.</p>
-                </div>
               </div>
             </div>
           </article>
