@@ -144,26 +144,70 @@
       align-items: center;
     }
 
+    .topbar__controls {
+      display: flex;
+      align-items: stretch;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
     .menu-wrap {
       position: relative;
     }
 
     .menu-button {
-      min-width: 150px;
-      padding: 10px 14px;
-      border-radius: 999px;
+      min-width: 220px;
+      min-height: 56px;
+      padding: 10px 14px 10px 16px;
+      border-radius: 18px;
       border: 1px solid var(--border);
-      background: var(--surface-muted);
+      background: linear-gradient(180deg, var(--surface-strong), var(--surface-muted));
       color: var(--text);
       font-weight: 650;
       cursor: pointer;
       text-align: left;
       transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      grid-template-areas:
+        'label caret'
+        'value caret';
+      column-gap: 12px;
+      row-gap: 2px;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
     }
 
     .menu-button:hover {
       transform: translateY(-1px);
       border-color: var(--border-strong);
+    }
+
+    .menu-button__label {
+      grid-area: label;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      color: var(--text-faint);
+      font-weight: 700;
+    }
+
+    .menu-button__value {
+      grid-area: value;
+      font-size: 14px;
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    .menu-button__caret {
+      grid-area: caret;
+      align-self: center;
+      font-size: 15px;
+      color: var(--brand);
+      transition: transform 140ms ease;
+    }
+
+    .menu-button__caret--open {
+      transform: rotate(180deg);
     }
 
     .menu-panel {
@@ -209,22 +253,25 @@
     }
 
     .theme-select {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 10px 8px 12px;
-      border-radius: 999px;
+      display: grid;
+      grid-template-columns: 1fr;
+      align-content: center;
+      gap: 2px;
+      padding: 10px 14px 10px 16px;
+      border-radius: 18px;
       border: 1px solid var(--border);
-      background: var(--surface-muted);
+      background: linear-gradient(180deg, var(--surface-strong), var(--surface-muted));
       color: var(--text-soft);
-      min-width: 196px;
+      min-width: 220px;
+      min-height: 56px;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
     }
 
     .theme-select__label {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.16em;
       color: var(--text-faint);
       white-space: nowrap;
     }
@@ -233,12 +280,12 @@
       border: 0;
       background: transparent;
       color: var(--text);
-      font-size: 13px;
-      font-weight: 600;
+      font-size: 14px;
+      font-weight: 700;
       outline: none;
-      min-width: 104px;
+      min-width: 0;
       cursor: pointer;
-      padding-right: 8px;
+      padding: 0;
     }
 
     .badge {
@@ -547,6 +594,16 @@
       gap: 14px 16px;
     }
 
+    .order-grid--trade-ticket {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      align-items: start;
+    }
+
+    .order-grid--trade-ticket .field--trade-ticket {
+      width: 100%;
+      max-width: none;
+    }
+
     .order-grid--comfortable .field input,
     .order-grid--comfortable .field select,
     .bulk-grid--comfortable .field input,
@@ -734,7 +791,12 @@
     @media (max-width: 900px) {
       .shell { padding: 16px; }
       .topbar { flex-direction: column; padding: 20px; }
-      .theme-select { width: 100%; justify-content: space-between; }
+      .topbar__controls {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .theme-select { width: 100%; }
       .menu-wrap,
       .menu-button { width: 100%; }
       .menu-panel { left: 0; right: auto; width: 100%; }
@@ -753,7 +815,7 @@
 </head>
 <body data-theme="dark">
   <div id="app"></div>
-  <script type="module" src="app.js?v=20260321-5"></script>
+  <script type="module" src="app.js?v=20260321-7"></script>
 </body>
 </html>
 

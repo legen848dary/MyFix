@@ -22,18 +22,33 @@ createApp({
         </div>
 
         <div class="topbar__actions">
-          <div class="menu-wrap">
-            <button class="menu-button" @click.stop="toggleMenu">{{ currentPageLabel }}</button>
-            <div v-if="menuOpen" class="menu-panel">
-              <button
-                v-for="page in pageOptions"
-                :key="page.code"
-                class="menu-panel__item"
-                :class="{ 'menu-panel__item--active': activePage === page.code }"
-                @click="openPage(page.code)">
-                {{ page.label }}
+          <div class="topbar__controls">
+            <div class="menu-wrap">
+              <button class="menu-button" :aria-expanded="menuOpen ? 'true' : 'false'" @click.stop="toggleMenu">
+                <span class="menu-button__label">Menu</span>
+                <span class="menu-button__value">{{ currentPageLabel }}</span>
+                <span class="menu-button__caret" :class="{ 'menu-button__caret--open': menuOpen }">▾</span>
               </button>
+              <div v-if="menuOpen" class="menu-panel">
+                <button
+                  v-for="page in pageOptions"
+                  :key="page.code"
+                  class="menu-panel__item"
+                  :class="{ 'menu-panel__item--active': activePage === page.code }"
+                  @click="openPage(page.code)">
+                  {{ page.label }}
+                </button>
+              </div>
             </div>
+
+            <label class="theme-select" aria-label="Theme selector">
+              <span class="theme-select__label">Theme</span>
+              <select v-model="theme" class="theme-select__control">
+                <option value="system">System</option>
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+              </select>
+            </label>
           </div>
 
           <div class="badge" :class="session.connected ? 'badge--live' : 'badge--warn'">
@@ -48,14 +63,6 @@ createApp({
             <span class="badge__dot"></span>
             <span>API {{ apiStatus }}</span>
           </div>
-          <label class="theme-select" aria-label="Theme selector">
-            <span class="theme-select__label">Theme</span>
-            <select v-model="theme" class="theme-select__control">
-              <option value="system">System</option>
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
-            </select>
-          </label>
         </div>
       </header>
 
@@ -85,60 +92,60 @@ createApp({
             </div>
 
             <div class="panel__body">
-              <div class="order-grid order-grid--comfortable">
-                <div class="field">
+              <div class="order-grid order-grid--comfortable order-grid--trade-ticket">
+                <div class="field field--trade-ticket">
                   <span class="field__label">Region</span>
                   <select v-model="orderDraft.region" @change="onRegionChange">
                     <option v-for="region in regions" :key="region.code" :value="region.code">{{ region.label }}</option>
                   </select>
                 </div>
-                <div class="field">
+                <div class="field field--trade-ticket">
                   <span class="field__label">Market</span>
                   <select v-model="orderDraft.market" @change="onMarketChange">
                     <option v-for="market in availableMarkets" :key="market.code" :value="market.code">{{ market.label }} · {{ market.currency }}</option>
                   </select>
                 </div>
-                <div class="field field--span-2">
+                <div class="field field--trade-ticket">
                   <span class="field__label">Symbol</span>
                   <input v-model="orderDraft.symbol" placeholder="AAPL" />
                 </div>
-                <div class="field">
+                <div class="field field--trade-ticket">
                   <span class="field__label">Side</span>
                   <select v-model="orderDraft.side">
                     <option v-for="side in sides" :key="side.code" :value="side.code">{{ side.label }}</option>
                   </select>
                 </div>
-                <div class="field">
+                <div class="field field--trade-ticket">
                   <span class="field__label">Quantity</span>
                   <input v-model.number="orderDraft.quantity" type="number" min="1" step="1" />
                 </div>
-                <div class="field">
+                <div class="field field--trade-ticket">
                   <span class="field__label">Order type</span>
                   <select v-model="orderDraft.orderType">
                     <option v-for="orderType in orderTypes" :key="orderType.code" :value="orderType.code">{{ orderType.label }}</option>
                   </select>
                 </div>
-                <div class="field">
+                <div class="field field--trade-ticket">
                   <span class="field__label">Time in force</span>
                   <select v-model="orderDraft.timeInForce">
                     <option v-for="tif in timeInForces" :key="tif.code" :value="tif.code">{{ tif.label }}</option>
                   </select>
                 </div>
-                <div class="field">
+                <div class="field field--trade-ticket">
                   <span class="field__label">Price type</span>
                   <select v-model="orderDraft.priceType">
                     <option v-for="priceType in priceTypes" :key="priceType.code" :value="priceType.code">{{ priceType.label }}</option>
                   </select>
                 </div>
-                <div class="field">
+                <div class="field field--trade-ticket">
                   <span class="field__label">Currency</span>
                   <input v-model="orderDraft.currency" maxlength="3" />
                 </div>
-                <div class="field">
+                <div class="field field--trade-ticket">
                   <span class="field__label">{{ needsLimitPrice ? 'Limit price' : 'Reference price' }}</span>
                   <input v-model.number="orderDraft.price" type="number" min="0" step="0.01" />
                 </div>
-                <div class="field" v-if="needsStopPrice">
+                <div class="field field--trade-ticket" v-if="needsStopPrice">
                   <span class="field__label">Stop price</span>
                   <input v-model.number="orderDraft.stopPrice" type="number" min="0" step="0.01" />
                 </div>
@@ -207,9 +214,13 @@ createApp({
                 <p class="compact-card__copy">{{ session.pendingProfileChange ? 'Reconnect required to apply selected profile.' : session.status }}</p>
               </div>
               <div class="compact-actions compact-actions--stacked">
-                <button class="button button--primary" @click="connectSession" :disabled="busyAction === 'connect'">Prime session</button>
-                <button class="button button--ghost" @click="disconnectSession" :disabled="busyAction === 'disconnect'">Standby</button>
-                <button class="button button--soft" @click="pulseTest" :disabled="busyAction === 'pulse'">Pulse test</button>
+                <button
+                  class="button"
+                  :class="session.connected ? 'button--ghost' : 'button--primary'"
+                  @click="session.connected ? disconnectSession() : connectSession()"
+                  :disabled="busyAction === 'connect' || busyAction === 'disconnect'">
+                  {{ busyAction === 'connect' ? 'Connecting…' : busyAction === 'disconnect' ? 'Disconnecting…' : session.connected ? 'Disconnect' : 'Connect' }}
+                </button>
               </div>
             </div>
           </article>
