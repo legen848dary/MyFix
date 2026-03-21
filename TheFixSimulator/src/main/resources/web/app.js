@@ -1,4 +1,4 @@
-import { createApp, ref, reactive, onMounted, onUnmounted, nextTick } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js'
+import { createApp, computed, ref, reactive, onMounted, onUnmounted, nextTick } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const BEHAVIOR_TYPES = [
@@ -338,11 +338,6 @@ createApp({
     const showRandom          = computed(() => form.behaviorType === 'RANDOM_FILL')
     const showPriceImprovement= computed(() => form.behaviorType === 'PRICE_IMPROVEMENT')
 
-    // Need to import computed
-    function computed(fn) {
-      // Simple reactive computed using a getter reference
-      return { get value() { return fn() } }
-    }
 
     // ── WebSocket ─────────────────────────────────────────────────────────────
     let ws, reconnectTimer

@@ -9,6 +9,8 @@ A new session should read this file first, then continue from the **Immediate ne
 
 ## Current overall status
 
+- Session handoff note (2026-03-21): this chat session did not make implementation changes or rerun validation commands; this file update is for handoff only.
+- The `Latest verified green state` section below still reflects the most recent known-good verification point and should remain the baseline for the next chat.
 - Repository is a Gradle multi-module project:
   - `TheFixClient`
   - `TheFixSimulator`
@@ -332,12 +334,13 @@ User requested:
 1. Improve combined web-stack polish/docs/tests as needed
 2. Keep the terminal demo FIX client available as an explicit opt-in workflow only
 3. Consider adding optional combined-stack support for the terminal demo FIX client when explicitly requested
+4. On the next chat, treat this tracker refresh as documentation-only and rerun any verification commands that are needed before making or committing further changes
 
 ## If a new chat session resumes from here
 
 Suggested prompt:
 
 ```text
-Read PROGRESS.md and resume from the Immediate next tasks section. Verify the latest green state if needed, then continue improving the combined web-stack workflows and any related container/runtime polish.
+Read PROGRESS.md and resume from the Immediate next tasks section. Note that the latest tracker update was documentation-only, so the last verified green state is still the one recorded there. Verify the latest green state if needed, then continue improving the combined web-stack workflows and any related container/runtime polish.
 ```
 

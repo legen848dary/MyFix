@@ -56,7 +56,8 @@ public final class RestApiRouter {
         router.get("/reports/:runId").handler(benchmarkReportsHandler.show());
 
         // ── Static SPA (Vue.js 3 + Tailwind) ─────────────────────────────────
-        router.route("/*").handler(StaticHandler.create("web"));
+        router.route("/*").handler(StaticHandler.create("web")
+                .setCachingEnabled(false));
 
         return router;
     }
