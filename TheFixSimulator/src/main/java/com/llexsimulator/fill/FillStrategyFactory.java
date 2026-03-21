@@ -25,6 +25,7 @@ public final class FillStrategyFactory {
         STRATEGIES.put(FillBehaviorType.FILL_AT_ARRIVAL_PRICE, new FillAtArrivalPriceStrategy());
         STRATEGIES.put(FillBehaviorType.RANDOM_FILL,           new RandomFillStrategy());
         STRATEGIES.put(FillBehaviorType.NO_FILL_IOC_CANCEL,    new IocCancelStrategy());
+        STRATEGIES.put(FillBehaviorType.valueOf("RANDOM_REJECT_CANCEL"), new RandomRejectCancelStrategy());
     }
 
     private FillStrategyFactory() {}

@@ -11,6 +11,7 @@ const BEHAVIOR_TYPES = [
   { value: 'FILL_AT_ARRIVAL_PRICE', label: 'Fill at Arrival Price' },
   { value: 'RANDOM_FILL',           label: 'Random Fill' },
   { value: 'NO_FILL_IOC_CANCEL',    label: 'No Fill / IOC Cancel' },
+  { value: 'RANDOM_REJECT_CANCEL',  label: 'Random Reject / Cancel' },
 ]
 
 const REJECT_REASONS = [
@@ -180,19 +181,19 @@ createApp({
                     <option v-for="r in rejectReasons" :key="r" :value="r">{{ r }}</option>
                   </select>
                 </div>
-                <div v-if="showRandom">
+                <div v-if="showRandomFillQty">
                   <label class="text-xs text-slate-400 mb-1 block">Min Fill %</label>
                   <input v-model.number="form.randomMinQtyPct" type="number" min="0" max="100" class="w-full bg-dark-700 border border-dark-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"/>
                 </div>
-                <div v-if="showRandom">
+                <div v-if="showRandomFillQty">
                   <label class="text-xs text-slate-400 mb-1 block">Max Fill %</label>
                   <input v-model.number="form.randomMaxQtyPct" type="number" min="0" max="100" class="w-full bg-dark-700 border border-dark-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"/>
                 </div>
-                <div v-if="showRandom">
+                <div v-if="showRandomDelay">
                   <label class="text-xs text-slate-400 mb-1 block">Min Delay (ms)</label>
                   <input v-model.number="form.randomMinDelayMs" type="number" min="0" class="w-full bg-dark-700 border border-dark-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"/>
                 </div>
-                <div v-if="showRandom">
+                <div v-if="showRandomDelay">
                   <label class="text-xs text-slate-400 mb-1 block">Max Delay (ms)</label>
                   <input v-model.number="form.randomMaxDelayMs" type="number" min="0" class="w-full bg-dark-700 border border-dark-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"/>
                 </div>
@@ -334,8 +335,9 @@ createApp({
 
     const showFillPct         = computed(() => ['PARTIAL_FILL','PARTIAL_THEN_CANCEL'].includes(form.behaviorType))
     const showDelay           = computed(() => form.behaviorType === 'DELAYED_FILL')
-    const showReject          = computed(() => form.behaviorType === 'REJECT')
-    const showRandom          = computed(() => form.behaviorType === 'RANDOM_FILL')
+    const showReject          = computed(() => ['REJECT', 'RANDOM_REJECT_CANCEL'].includes(form.behaviorType))
+    const showRandomFillQty   = computed(() => form.behaviorType === 'RANDOM_FILL')
+    const showRandomDelay     = computed(() => ['RANDOM_FILL', 'RANDOM_REJECT_CANCEL'].includes(form.behaviorType))
     const showPriceImprovement= computed(() => form.behaviorType === 'PRICE_IMPROVEMENT')
 
 
@@ -607,7 +609,7 @@ createApp({
       wsConnected, activeProfile, profiles, selectedProfile, sessions,
       orders, metrics, form, behaviorTypes, rejectReasons,
       loggedOnSessionCount,
-      showFillPct, showDelay, showReject, showRandom, showPriceImprovement,
+      showFillPct, showDelay, showReject, showRandomFillQty, showRandomDelay, showPriceImprovement,
       latencyChart, selectedRefreshSeconds, metricsRefreshOptions, isResettingMetrics,
       updateMetricsRefreshInterval, resetMetrics,
       activateProfile, saveAndActivate, disconnectSession, execTypeBadge

@@ -42,6 +42,8 @@ public final class FillProfileManager {
                 "REJECT", 0, 0, 0, "SIMULATOR_REJECT", 0, 100, 0, 0, 0));
         createOrUpdate(new FillProfileDto("random-fill", "Random qty + random delay",
                 "RANDOM_FILL", 0, 1, 0, null, 50, 100, 0, 5, 0));
+        createOrUpdate(new FillProfileDto("random-reject-cancel", "Randomly reject or cancel orders",
+                "RANDOM_REJECT_CANCEL", 0, 0, 0, "SIMULATOR_REJECT", 0, 0, 0, 5, 0));
         createOrUpdate(new FillProfileDto("price-improvement", "Fill with 1bp price improvement",
                 "PRICE_IMPROVEMENT", 10_000, 1, 0, null, 0, 100, 0, 0, 1));
 

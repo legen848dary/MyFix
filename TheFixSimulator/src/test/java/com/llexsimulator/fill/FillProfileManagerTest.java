@@ -16,7 +16,7 @@ class FillProfileManagerTest {
         FillProfileManager manager = new FillProfileManager();
 
         assertEquals("immediate-full-fill", manager.getActiveProfileName());
-        assertTrue(manager.getAllProfiles().size() >= 6);
+        assertTrue(manager.getAllProfiles().size() >= 7);
         assertEquals(FillBehaviorType.IMMEDIATE_FULL_FILL, manager.getActiveConfig().behaviorType);
     }
 
@@ -61,6 +61,17 @@ class FillProfileManagerTest {
 
         assertTrue(manager.delete("custom-random"));
         assertFalse(manager.delete("custom-random"));
+    }
+
+    @Test
+    void activateSwitchesToRandomRejectCancelBuiltinProfile() {
+        FillProfileManager manager = new FillProfileManager();
+
+        manager.activate("random-reject-cancel");
+
+        assertEquals("random-reject-cancel", manager.getActiveProfileName());
+        assertEquals(FillBehaviorType.valueOf("RANDOM_REJECT_CANCEL"), manager.getActiveConfig().behaviorType);
+        assertEquals(RejectReason.SIMULATOR_REJECT, manager.getActiveConfig().rejectReason);
     }
 }
 

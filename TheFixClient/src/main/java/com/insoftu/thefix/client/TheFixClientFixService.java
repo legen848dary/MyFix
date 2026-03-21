@@ -32,6 +32,7 @@ import quickfix.field.ExecType;
 import quickfix.field.HandlInst;
 import quickfix.field.LeavesQty;
 import quickfix.field.MsgType;
+import quickfix.field.OrdRejReason;
 import quickfix.field.OrderQty;
 import quickfix.field.OrdStatus;
 import quickfix.field.OrdType;
@@ -447,11 +448,19 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     }
 
     private void handleExecutionReport(Message message) {
-        execReportCount.incrementAndGet();
+        boolean rejectedExecutionReport = isRejectedExecutionReport(message);
+        if (rejectedExecutionReport) {
+            rejectCount.incrementAndGet();
+        } else {
+            execReportCount.incrementAndGet();
+        }
         String clOrdId = safeString(message, ClOrdID.FIELD, "UNKNOWN");
         OrderView orderView = recentOrders.computeIfAbsent(clOrdId, ignored -> OrderView.fromExecution(message));
         orderView.updateFromExecutionReport(message);
         trimOrders();
+        if (rejectedExecutionReport) {
+            addEvent("WARN", "Order rejected", executionReportRejectReason(message));
+        }
     }
 
     private void handleReject(Message message, String messageType) {
@@ -464,6 +473,23 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         orderView.markRejected(reason, safeString(message, BusinessRejectReason.FIELD, messageType));
         trimOrders();
         addEvent("WARN", "Order rejected", reason);
+    }
+
+    private static boolean isRejectedExecutionReport(Message message) {
+        return "8".equals(safeString(message, ExecType.FIELD, ""))
+                || "8".equals(safeString(message, OrdStatus.FIELD, ""));
+    }
+
+    private static String executionReportRejectReason(Message message) {
+        String text = safeString(message, Text.FIELD, "").trim();
+        if (!text.isBlank()) {
+            return text;
+        }
+        String code = safeString(message, OrdRejReason.FIELD, "").trim();
+        if (!code.isBlank()) {
+            return "Execution report rejected (OrdRejReason=" + code + ")";
+        }
+        return "Execution report rejected";
     }
 
     private void rememberOrder(OrderView orderView) {
