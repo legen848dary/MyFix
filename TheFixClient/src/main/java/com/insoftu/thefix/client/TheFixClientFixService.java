@@ -163,7 +163,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     synchronized void pulseTest() {
         addEvent("INFO", "Pulse check executed", loggedOn
                 ? "FIX initiator is logged on and ready for order flow."
-                : "FIX initiator heartbeat check completed while awaiting logon.");
+                : "No live FIX session is connected yet. Use Prime session or Start demo flow to establish logon.");
     }
 
     synchronized void startAutoFlow(OrderRequest template, int requestedRate) {
@@ -173,6 +173,13 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         autoFlowActive = true;
         if (loggedOn) {
             sessionStatus = "Connected · auto flow live";
+        } else if (initiator == null) {
+            connect();
+            if (initiator != null && !loggedOn) {
+                sessionStatus = "Connecting · auto flow armed";
+            }
+        } else {
+            sessionStatus = "Connecting · auto flow armed";
         }
 
         if (autoFlowFuture != null) {
@@ -182,7 +189,11 @@ final class TheFixClientFixService implements Application, AutoCloseable {
 
         long periodNanos = Math.max(1L, 1_000_000_000L / effectiveRate);
         autoFlowFuture = autoFlowExecutor.scheduleAtFixedRate(() -> sendAutoFlowOrder(), 0L, periodNanos, TimeUnit.NANOSECONDS);
-        addEvent("SUCCESS", "Auto flow started", "Streaming demo orders at " + effectiveRate + " msg/s using the active order template.");
+        if (loggedOn) {
+            addEvent("SUCCESS", "Auto flow started", "Streaming demo orders at " + effectiveRate + " msg/s using the active order template.");
+        } else {
+            addEvent("INFO", "Auto flow armed", "Demo flow will begin at " + effectiveRate + " msg/s as soon as the FIX session logs on.");
+        }
     }
 
     synchronized void stopAutoFlow() {

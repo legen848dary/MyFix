@@ -33,6 +33,54 @@ class TheFixClientLiveIntegrationTest {
     @Test
     @Timeout(30)
     void workstationCanLogOnAndRouteALiveOrderToTheSimulator() throws Exception {
+        state = createLiveState();
+
+        state.connect();
+        assertTrue(waitFor(() -> state.snapshot().getJsonObject("session").getBoolean("connected"), Duration.ofSeconds(10)),
+                "Expected TheFixClient to log on to the simulator acceptor");
+
+        state.sendOrder(new JsonObject()
+                .put("symbol", "AAPL")
+                .put("side", "BUY")
+                .put("quantity", 100)
+                .put("price", 100.25)
+                .put("timeInForce", "DAY"));
+
+        assertTrue(waitFor(() -> state.snapshot().getJsonObject("kpis").getLong("executionReports") > 0L, Duration.ofSeconds(10)),
+                "Expected at least one execution report after routing a live order");
+
+        JsonObject snapshot = state.snapshot();
+        assertTrue(snapshot.getJsonObject("session").getBoolean("connected"));
+        assertTrue(snapshot.getJsonObject("kpis").getLong("sentOrders") > 0L);
+        assertFalse(snapshot.getJsonArray("recentOrders").isEmpty());
+    }
+
+    @Test
+    @Timeout(30)
+    void startingDemoFlowFromIdleAutoConnectsAndStreamsOrders() throws Exception {
+        state = createLiveState();
+
+        state.startOrderFlow(new JsonObject()
+                .put("symbol", "AAPL")
+                .put("side", "BUY")
+                .put("quantity", 25)
+                .put("price", 100.25)
+                .put("timeInForce", "DAY")
+                .put("ratePerSecond", 2));
+
+        assertTrue(waitFor(() -> state.snapshot().getJsonObject("session").getBoolean("connected"), Duration.ofSeconds(10)),
+                "Expected auto flow start to establish a FIX session automatically");
+        assertTrue(waitFor(() -> state.snapshot().getJsonObject("kpis").getLong("executionReports") > 0L, Duration.ofSeconds(10)),
+                "Expected execution reports after auto flow is armed from idle state");
+
+        JsonObject snapshot = state.snapshot();
+        assertTrue(snapshot.getJsonObject("session").getBoolean("connected"));
+        assertTrue(snapshot.getJsonObject("session").getBoolean("autoFlowActive"));
+        assertTrue(snapshot.getJsonObject("kpis").getLong("sentOrders") > 0L);
+        assertFalse(snapshot.getJsonArray("recentOrders").isEmpty());
+    }
+
+    private TheFixClientWorkbenchState createLiveState() throws Exception {
         int fixPort = findFreePort();
         int webPort = findFreePort();
 
@@ -57,26 +105,7 @@ class TheFixClientLiveIntegrationTest {
                 "build/test-live-quickfixj",
                 false
         );
-        state = new TheFixClientWorkbenchState(config);
-
-        state.connect();
-        assertTrue(waitFor(() -> state.snapshot().getJsonObject("session").getBoolean("connected"), Duration.ofSeconds(10)),
-                "Expected TheFixClient to log on to the simulator acceptor");
-
-        state.sendOrder(new JsonObject()
-                .put("symbol", "AAPL")
-                .put("side", "BUY")
-                .put("quantity", 100)
-                .put("price", 100.25)
-                .put("timeInForce", "DAY"));
-
-        assertTrue(waitFor(() -> state.snapshot().getJsonObject("kpis").getLong("executionReports") > 0L, Duration.ofSeconds(10)),
-                "Expected at least one execution report after routing a live order");
-
-        JsonObject snapshot = state.snapshot();
-        assertTrue(snapshot.getJsonObject("session").getBoolean("connected"));
-        assertTrue(snapshot.getJsonObject("kpis").getLong("sentOrders") > 0L);
-        assertFalse(snapshot.getJsonArray("recentOrders").isEmpty());
+        return new TheFixClientWorkbenchState(config);
     }
 
     private static boolean waitFor(Check check, Duration timeout) throws Exception {
