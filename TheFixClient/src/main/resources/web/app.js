@@ -59,10 +59,6 @@ createApp({
             <span class="badge__dot"></span>
             <span>{{ session.autoFlowActive ? session.autoFlowDescriptor : 'Bulk flow idle' }}</span>
           </div>
-          <div class="badge">
-            <span class="badge__dot"></span>
-            <span>API {{ apiStatus }}</span>
-          </div>
         </div>
       </header>
 
@@ -249,7 +245,7 @@ createApp({
               <div class="compact-actions compact-actions--stacked">
                 <button
                   class="button"
-                  :class="session.connected ? 'button--ghost' : 'button--primary'"
+                  :class="session.connected ? 'button--danger' : 'button--success'"
                   @click="session.connected ? disconnectSession() : connectSession()"
                   :disabled="busyAction === 'connect' || busyAction === 'disconnect'">
                   {{ busyAction === 'connect' ? 'Connecting…' : busyAction === 'disconnect' ? 'Disconnecting…' : session.connected ? 'Disconnect' : 'Connect' }}
