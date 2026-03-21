@@ -5,15 +5,20 @@ import io.vertx.core.json.JsonObject;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.nio.file.Path;
 import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TheFixClientLiveIntegrationTest {
+
+    @TempDir
+    Path tempDir;
 
     private SimulatorBootstrap simulatorBootstrap;
     private TheFixClientWorkbenchState state;
@@ -80,6 +85,35 @@ class TheFixClientLiveIntegrationTest {
         assertFalse(snapshot.getJsonArray("recentOrders").isEmpty());
     }
 
+    @Test
+    @Timeout(30)
+    void burstBulkFlowCanCompleteAFiniteRun() throws Exception {
+        state = createLiveState();
+
+        state.startOrderFlow(new JsonObject()
+                .put("region", "AMERICAS")
+                .put("market", "XNAS")
+                .put("currency", "USD")
+                .put("symbol", "AAPL")
+                .put("side", "BUY")
+                .put("quantity", 10)
+                .put("price", 100.25)
+                .put("timeInForce", "DAY")
+                .put("orderType", "LIMIT")
+                .put("priceType", "PER_UNIT")
+                .put("bulkMode", "BURST")
+                .put("totalOrders", 6)
+                .put("burstSize", 2)
+                .put("burstIntervalMs", 200));
+
+        assertTrue(waitFor(() -> state.snapshot().getJsonObject("session").getBoolean("connected"), Duration.ofSeconds(10)),
+                "Expected burst bulk flow to establish a FIX session automatically");
+        assertTrue(waitFor(() -> state.snapshot().getJsonObject("kpis").getLong("sentOrders") >= 6L, Duration.ofSeconds(10)),
+                "Expected burst bulk flow to route the requested finite run");
+        assertTrue(waitFor(() -> !state.snapshot().getJsonObject("session").getBoolean("autoFlowActive"), Duration.ofSeconds(10)),
+                "Expected burst bulk flow to stop itself after reaching totalOrders");
+    }
+
     private TheFixClientWorkbenchState createLiveState() throws Exception {
         int fixPort = findFreePort();
         int webPort = findFreePort();
@@ -96,7 +130,7 @@ class TheFixClientLiveIntegrationTest {
                 "127.0.0.1",
                 fixPort,
                 "FIX.4.4",
-                "HSBC_TRDR01",
+                "THEFIX_TRDR01",
                 "LLEXSIM",
                 "FIX.4.4",
                 30,
@@ -105,7 +139,9 @@ class TheFixClientLiveIntegrationTest {
                 "build/test-live-quickfixj",
                 false
         );
-        return new TheFixClientWorkbenchState(config);
+        TheFixSessionProfileStore store = new TheFixSessionProfileStore(config);
+        store.updateStoragePath(tempDir.resolve("profiles").toString());
+        return new TheFixClientWorkbenchState(config, store);
     }
 
     private static boolean waitFor(Check check, Duration timeout) throws Exception {

@@ -27,7 +27,7 @@ class TheFixClientConfigTest {
                 "127.0.0.1",
                 9880,
                 "FIX.4.4",
-                "HSBC_TRDR01",
+                "THEFIX_TRDR01",
                 "LLEXSIM",
                 "FIX.4.4",
                 30,
@@ -39,7 +39,7 @@ class TheFixClientConfigTest {
 
         assertEquals("127.0.0.1", config.toFixDemoClientConfig().host());
         assertEquals(9880, config.toFixDemoClientConfig().port());
-        assertEquals("HSBC_TRDR01", config.toFixDemoClientConfig().senderCompId());
+        assertEquals("THEFIX_TRDR01", config.toFixDemoClientConfig().senderCompId());
         assertEquals("LLEXSIM", config.toFixDemoClientConfig().targetCompId());
     }
 }

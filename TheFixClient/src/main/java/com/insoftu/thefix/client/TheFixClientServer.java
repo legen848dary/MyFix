@@ -43,9 +43,13 @@ final class TheFixClientServer {
                 .put("port", config.port())));
 
         router.get("/api/overview").handler(ctx -> writeJson(ctx.response(), workbenchState.snapshot()));
+        router.get("/api/settings").handler(ctx -> writeJson(ctx.response(), workbenchState.settingsSnapshot()));
         router.post("/api/session/connect").handler(ctx -> writeJson(ctx.response(), workbenchState.connect()));
         router.post("/api/session/disconnect").handler(ctx -> writeJson(ctx.response(), workbenchState.disconnect()));
         router.post("/api/session/pulse-test").handler(ctx -> writeJson(ctx.response(), workbenchState.pulseTest()));
+        router.post("/api/settings/profiles/save").handler(ctx -> writeJson(ctx.response(), workbenchState.saveSettingsProfile(bodyJson(ctx))));
+        router.post("/api/settings/profiles/activate").handler(ctx -> writeJson(ctx.response(), workbenchState.activateSettingsProfile(bodyJson(ctx))));
+        router.post("/api/settings/storage-path").handler(ctx -> writeJson(ctx.response(), workbenchState.updateSettingsStoragePath(bodyJson(ctx))));
         router.post("/api/order-ticket/preview").handler(ctx -> writeJson(ctx.response(), workbenchState.previewOrder(bodyJson(ctx))));
         router.post("/api/order-ticket/send").handler(ctx -> writeJson(ctx.response(), workbenchState.sendOrder(bodyJson(ctx))));
         router.post("/api/order-flow/start").handler(ctx -> writeJson(ctx.response(), workbenchState.startOrderFlow(bodyJson(ctx))));

@@ -1,6 +1,5 @@
 package com.insoftu.thefix.client;
 
-import com.llexsimulator.client.FixDemoClientConfig;
 import com.llexsimulator.client.NoOpQuickFixLogFactory;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -28,7 +27,7 @@ import quickfix.field.AvgPx;
 import quickfix.field.BusinessRejectReason;
 import quickfix.field.ClOrdID;
 import quickfix.field.CumQty;
-import quickfix.field.ExecID;
+import quickfix.field.Currency;
 import quickfix.field.ExecType;
 import quickfix.field.HandlInst;
 import quickfix.field.LeavesQty;
@@ -37,13 +36,14 @@ import quickfix.field.OrderQty;
 import quickfix.field.OrdStatus;
 import quickfix.field.OrdType;
 import quickfix.field.Price;
+import quickfix.field.PriceType;
+import quickfix.field.SecurityExchange;
 import quickfix.field.Side;
+import quickfix.field.StopPx;
 import quickfix.field.Symbol;
 import quickfix.field.Text;
 import quickfix.field.TimeInForce;
 import quickfix.field.TransactTime;
-import quickfix.fix44.NewOrderSingle;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.time.Duration;
@@ -56,7 +56,6 @@ import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -74,6 +73,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     private static final int MAX_ORDERS = 40;
 
     private final TheFixClientConfig config;
+    private final TheFixSessionProfileStore profileStore;
     private final AtomicReference<SessionID> activeSessionId = new AtomicReference<>();
     private final AtomicLong sequence = new AtomicLong();
     private final AtomicLong sentCount = new AtomicLong();
@@ -95,11 +95,14 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     private boolean autoFlowActive;
     private Instant connectedAt;
     private String sessionStatus = "Standby";
-    private OrderRequest autoFlowTemplate;
-    private int autoFlowRate;
+    private TheFixSessionProfile connectedProfile;
+    private TheFixOrderRequest autoFlowTemplate;
+    private TheFixBulkOptions autoFlowOptions;
+    private long autoFlowRemaining;
 
-    TheFixClientFixService(TheFixClientConfig config) {
+    TheFixClientFixService(TheFixClientConfig config, TheFixSessionProfileStore profileStore) {
         this.config = config;
+        this.profileStore = profileStore;
         addEvent("INFO", "FIX service ready", "QuickFIX/J initiator wiring is ready for operator commands.");
     }
 
@@ -114,24 +117,26 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         }
 
         try {
-            ensureQuickFixDirectories();
-            FixDemoClientConfig demoConfig = config.toFixDemoClientConfig();
-            SessionSettings settings = demoConfig.toSessionSettings();
+            TheFixSessionProfile activeProfile = profileStore.activeProfile();
+            ensureQuickFixDirectories(activeProfile);
+            SessionSettings settings = buildSessionSettings(activeProfile);
             MessageStoreFactory storeFactory = new MemoryStoreFactory();
-            LogFactory logFactory = config.rawMessageLoggingEnabled()
+            LogFactory logFactory = activeProfile.rawMessageLoggingEnabled()
                     ? new FileLogFactory(settings)
                     : new NoOpQuickFixLogFactory();
             MessageFactory messageFactory = new DefaultMessageFactory();
 
             initiator = new SocketInitiator(this, storeFactory, settings, logFactory, messageFactory);
             connectionRequested = true;
+            connectedProfile = activeProfile;
             sessionStatus = "Connecting";
             initiator.start();
-            addEvent("INFO", "Connection requested", "Opening QuickFIX/J initiator session to " + config.fixHost() + ':' + config.fixPort() + '.');
+            addEvent("INFO", "Connection requested", "Opening QuickFIX/J initiator session to " + activeProfile.fixHost() + ':' + activeProfile.fixPort() + " using profile " + activeProfile.name() + '.');
         } catch (Exception exception) {
             sessionStatus = "Error";
             connectionRequested = false;
             initiator = null;
+            connectedProfile = null;
             addEvent("WARN", "Connection failed", rootMessage(exception));
             log.warn("Unable to start TheFixClient FIX initiator", exception);
         }
@@ -142,6 +147,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         connectionRequested = false;
         loggedOn = false;
         connectedAt = null;
+        connectedProfile = null;
         activeSessionId.set(null);
         sessionStatus = "Standby";
 
@@ -166,20 +172,23 @@ final class TheFixClientFixService implements Application, AutoCloseable {
                 : "No live FIX session is connected yet. Use Prime session or Start demo flow to establish logon.");
     }
 
-    synchronized void startAutoFlow(OrderRequest template, int requestedRate) {
-        int effectiveRate = requestedRate > 0 ? requestedRate : config.defaultRatePerSecond();
+    synchronized void startAutoFlow(TheFixOrderRequest template, TheFixBulkOptions requestedOptions) {
+        TheFixBulkOptions effectiveOptions = requestedOptions == null
+                ? new TheFixBulkOptions("FIXED_RATE", config.defaultRatePerSecond(), 10, 1_000, 0)
+                : requestedOptions.normalized(config.defaultRatePerSecond());
         autoFlowTemplate = template;
-        autoFlowRate = effectiveRate;
+        autoFlowOptions = effectiveOptions;
+        autoFlowRemaining = effectiveOptions.totalOrders() > 0 ? effectiveOptions.totalOrders() : -1L;
         autoFlowActive = true;
         if (loggedOn) {
-            sessionStatus = "Connected · auto flow live";
+            sessionStatus = "Connected · bulk flow live";
         } else if (initiator == null) {
             connect();
             if (initiator != null && !loggedOn) {
-                sessionStatus = "Connecting · auto flow armed";
+                sessionStatus = "Connecting · bulk flow armed";
             }
         } else {
-            sessionStatus = "Connecting · auto flow armed";
+            sessionStatus = "Connecting · bulk flow armed";
         }
 
         if (autoFlowFuture != null) {
@@ -187,12 +196,17 @@ final class TheFixClientFixService implements Application, AutoCloseable {
             autoFlowFuture = null;
         }
 
-        long periodNanos = Math.max(1L, 1_000_000_000L / effectiveRate);
-        autoFlowFuture = autoFlowExecutor.scheduleAtFixedRate(() -> sendAutoFlowOrder(), 0L, periodNanos, TimeUnit.NANOSECONDS);
-        if (loggedOn) {
-            addEvent("SUCCESS", "Auto flow started", "Streaming demo orders at " + effectiveRate + " msg/s using the active order template.");
+        if (effectiveOptions.isBurstMode()) {
+            autoFlowFuture = autoFlowExecutor.scheduleAtFixedRate(this::sendAutoFlowOrders, 0L,
+                    effectiveOptions.burstIntervalMs(), TimeUnit.MILLISECONDS);
         } else {
-            addEvent("INFO", "Auto flow armed", "Demo flow will begin at " + effectiveRate + " msg/s as soon as the FIX session logs on.");
+            long periodNanos = Math.max(1L, 1_000_000_000L / effectiveOptions.ratePerSecond());
+            autoFlowFuture = autoFlowExecutor.scheduleAtFixedRate(this::sendAutoFlowOrders, 0L, periodNanos, TimeUnit.NANOSECONDS);
+        }
+        if (loggedOn) {
+            addEvent("SUCCESS", "Bulk flow started", "Running " + effectiveOptions.describe() + " using the active order template.");
+        } else {
+            addEvent("INFO", "Bulk flow armed", "Bulk routing will begin using " + effectiveOptions.describe() + " as soon as the FIX session logs on.");
         }
     }
 
@@ -200,24 +214,37 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         stopAutoFlowInternal(true);
     }
 
-    synchronized boolean sendOrder(OrderRequest request) {
+    synchronized boolean sendOrder(TheFixOrderRequest request) {
         return sendOrderInternal(request, false, true);
     }
 
     synchronized JsonObject sessionSnapshot() {
+        TheFixSessionProfile configuredProfile = profileStore.activeProfile();
+        TheFixSessionProfile effectiveProfile = connectedProfile != null ? connectedProfile : configuredProfile;
         return new JsonObject()
                 .put("connected", loggedOn)
                 .put("status", sessionStatus)
-                .put("host", config.fixHost())
-                .put("port", config.fixPort())
-                .put("beginString", config.beginString())
-                .put("senderCompId", config.senderCompId())
-                .put("targetCompId", config.targetCompId())
+                .put("host", effectiveProfile.fixHost())
+                .put("port", effectiveProfile.fixPort())
+                .put("beginString", effectiveProfile.beginString())
+                .put("senderCompId", effectiveProfile.senderCompId())
+                .put("targetCompId", effectiveProfile.targetCompId())
+                .put("profileName", effectiveProfile.name())
+                .put("activeProfileName", configuredProfile.name())
+                .put("pendingProfileChange", connectedProfile != null && !connectedProfile.name().equals(configuredProfile.name()))
+                .put("fixVersionCode", effectiveProfile.fixVersionCode())
+                .put("fixVersionLabel", effectiveProfile.fixVersion().label())
                 .put("mode", "QuickFIX/J initiator")
                 .put("uptime", formatUptime())
                 .put("autoFlowActive", autoFlowActive)
-                .put("autoFlowRate", autoFlowRate)
-                .put("rawMessageLoggingEnabled", config.rawMessageLoggingEnabled());
+                .put("autoFlowRate", autoFlowOptions == null ? 0 : autoFlowOptions.ratePerSecond())
+                .put("autoFlowMode", autoFlowOptions == null ? "OFF" : autoFlowOptions.mode())
+                .put("autoFlowBurstSize", autoFlowOptions == null ? 0 : autoFlowOptions.burstSize())
+                .put("autoFlowBurstIntervalMs", autoFlowOptions == null ? 0 : autoFlowOptions.burstIntervalMs())
+                .put("autoFlowTotalOrders", autoFlowOptions == null ? 0 : autoFlowOptions.totalOrders())
+                .put("autoFlowRemaining", autoFlowRemaining)
+                .put("autoFlowDescriptor", autoFlowOptions == null ? "Inactive" : autoFlowOptions.describe())
+                .put("rawMessageLoggingEnabled", effectiveProfile.rawMessageLoggingEnabled());
     }
 
     synchronized JsonObject kpiSnapshot() {
@@ -281,7 +308,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         activeSessionId.set(sessionId);
         loggedOn = true;
         connectedAt = Instant.now();
-        sessionStatus = autoFlowActive ? "Connected · auto flow live" : "Connected";
+        sessionStatus = autoFlowActive ? "Connected · bulk flow live" : "Connected";
         addEvent("SUCCESS", "Logon complete", "FIX session established: " + sessionId + '.');
     }
 
@@ -325,20 +352,42 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         autoFlowExecutor.shutdownNow();
     }
 
-    private void sendAutoFlowOrder() {
-        OrderRequest template;
+    private void sendAutoFlowOrders() {
+        TheFixOrderRequest template;
+        TheFixBulkOptions options;
         synchronized (this) {
             template = autoFlowTemplate;
+            options = autoFlowOptions;
         }
-        if (template == null) {
+        if (template == null || options == null) {
             return;
         }
         synchronized (this) {
-            sendOrderInternal(template, true, false);
+            int ordersPerTick = options.isBurstMode() ? options.burstSize() : 1;
+            for (int i = 0; i < ordersPerTick; i++) {
+                if (!autoFlowActive || autoFlowTemplate == null) {
+                    return;
+                }
+                if (autoFlowRemaining == 0L) {
+                    completeAutoFlow();
+                    return;
+                }
+                boolean sent = sendOrderInternal(template, true, false);
+                if (sent && autoFlowRemaining > 0L) {
+                    autoFlowRemaining--;
+                    if (autoFlowRemaining == 0L) {
+                        completeAutoFlow();
+                        return;
+                    }
+                }
+                if (!sent && !loggedOn) {
+                    return;
+                }
+            }
         }
     }
 
-    private boolean sendOrderInternal(OrderRequest request, boolean autoFlowOrder, boolean addManualEvent) {
+    private boolean sendOrderInternal(TheFixOrderRequest request, boolean autoFlowOrder, boolean addManualEvent) {
         SessionID sessionId = activeSessionId.get();
         if (!loggedOn || sessionId == null) {
             if (autoFlowOrder) {
@@ -432,37 +481,100 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     private void stopAutoFlowInternal(boolean addEvent) {
         autoFlowActive = false;
         autoFlowTemplate = null;
-        autoFlowRate = 0;
+        autoFlowOptions = null;
+        autoFlowRemaining = 0L;
         if (autoFlowFuture != null) {
             autoFlowFuture.cancel(false);
             autoFlowFuture = null;
         }
         if (addEvent) {
-            addEvent("INFO", "Auto flow stopped", "The repeating demo order stream has been paused.");
+            addEvent("INFO", "Bulk flow stopped", "The repeating bulk order stream has been paused.");
         }
         if (loggedOn) {
             sessionStatus = "Connected";
         }
     }
 
-    private void ensureQuickFixDirectories() throws IOException {
-        FixDemoClientConfig demoConfig = config.toFixDemoClientConfig();
-        Files.createDirectories(demoConfig.storeDir());
-        Files.createDirectories(demoConfig.rawLogDir());
+    private void completeAutoFlow() {
+        TheFixBulkOptions completedOptions = autoFlowOptions;
+        stopAutoFlowInternal(false);
+        if (loggedOn) {
+            sessionStatus = "Connected";
+        }
+        if (completedOptions != null) {
+            addEvent("SUCCESS", "Bulk flow complete", "Completed " + completedOptions.describe() + " with the current template.");
+        }
     }
 
-    private NewOrderSingle buildNewOrderSingle(String clOrdId, OrderRequest request) {
-        NewOrderSingle order = new NewOrderSingle(
-                new ClOrdID(clOrdId),
-                new Side(request.fixSide()),
-                new TransactTime(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)),
-                new OrdType(OrdType.LIMIT)
-        );
-        order.set(new HandlInst(HandlInst.AUTOMATED_EXECUTION_NO_INTERVENTION));
-        order.set(new Symbol(request.symbol()));
-        order.set(new OrderQty(request.quantity()));
-        order.set(new Price(request.price()));
-        order.set(new TimeInForce(request.fixTimeInForce()));
+    synchronized void onProfileActivated() {
+        TheFixSessionProfile activeProfile = profileStore.activeProfile();
+        if (initiator != null) {
+            addEvent("INFO", "Profile updated", "Active profile is now " + activeProfile.name() + ". Reconnect the FIX session to apply the new settings.");
+        } else {
+            addEvent("INFO", "Profile updated", "Active profile is now " + activeProfile.name() + '.');
+        }
+    }
+
+    private void ensureQuickFixDirectories(TheFixSessionProfile profile) throws IOException {
+        Files.createDirectories(profile.storeDir());
+        Files.createDirectories(profile.rawLogDir());
+    }
+
+    private SessionSettings buildSessionSettings(TheFixSessionProfile profile) {
+        SessionSettings settings = new SessionSettings();
+        SessionID sessionId = new SessionID(profile.beginString(), profile.senderCompId(), profile.targetCompId());
+
+        settings.setString(sessionId, "ConnectionType", "initiator");
+        settings.setString(sessionId, "BeginString", profile.beginString());
+        settings.setString(sessionId, "SenderCompID", profile.senderCompId());
+        settings.setString(sessionId, "TargetCompID", profile.targetCompId());
+        settings.setString(sessionId, "SocketConnectHost", profile.fixHost());
+        settings.setString(sessionId, "SocketConnectPort", Integer.toString(profile.fixPort()));
+        settings.setString(sessionId, "HeartBtInt", Integer.toString(profile.heartBtIntSec()));
+        settings.setString(sessionId, "ReconnectInterval", Integer.toString(profile.reconnectIntervalSec()));
+        settings.setString(sessionId, "StartTime", profile.sessionStartTime());
+        settings.setString(sessionId, "EndTime", profile.sessionEndTime());
+        settings.setString(sessionId, "TimeZone", "UTC");
+        settings.setString(sessionId, "SocketNodelay", "Y");
+        settings.setString(sessionId, "ResetOnLogon", profile.resetOnLogon() ? "Y" : "N");
+        settings.setString(sessionId, "ResetOnLogout", "Y");
+        settings.setString(sessionId, "ResetOnDisconnect", "Y");
+        settings.setString(sessionId, "UseDataDictionary", "N");
+        settings.setString(sessionId, "ValidateIncomingMessage", "N");
+        settings.setString(sessionId, "ValidateUserDefinedFields", "N");
+        settings.setString(sessionId, "PersistMessages", "N");
+        settings.setString(sessionId, "FileStorePath", profile.storeDir().toString());
+        settings.setString(sessionId, "FileLogPath", profile.rawLogDir().toString());
+        if ("FIXT.1.1".equals(profile.beginString())) {
+            settings.setString(sessionId, "DefaultApplVerID", profile.defaultApplVerId());
+        }
+        return settings;
+    }
+
+    private Message buildNewOrderSingle(String clOrdId, TheFixOrderRequest request) {
+        Message order = new Message();
+        order.getHeader().setString(MsgType.FIELD, MsgType.NEW_ORDER_SINGLE);
+        order.setField(new ClOrdID(clOrdId));
+        order.setField(new Side(request.fixSide()));
+        order.setField(new TransactTime(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)));
+        order.setField(new OrdType(request.fixOrdType()));
+        order.setField(new HandlInst(HandlInst.AUTOMATED_EXECUTION_NO_INTERVENTION));
+        order.setField(new Symbol(request.symbol()));
+        order.setField(new OrderQty(request.quantity()));
+        order.setField(new TimeInForce(request.fixTimeInForce()));
+        order.setField(new PriceType(request.fixPriceType()));
+        if (!request.market().isBlank()) {
+            order.setField(new SecurityExchange(request.market()));
+        }
+        if (!request.currency().isBlank()) {
+            order.setField(new Currency(request.currency()));
+        }
+        if (request.requiresLimitPrice()) {
+            order.setField(new Price(request.price()));
+        }
+        if (request.requiresStopPrice()) {
+            order.setField(new StopPx(request.stopPrice()));
+        }
         return order;
     }
 
@@ -541,24 +653,6 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         return Objects.toString(cursor.getMessage(), cursor.getClass().getSimpleName());
     }
 
-    record OrderRequest(String symbol, String side, int quantity, double price, String timeInForce) {
-        String summary() {
-            return side + ' ' + quantity + ' ' + symbol + " @ " + String.format(Locale.US, "%.2f", price) + ' ' + timeInForce;
-        }
-
-        char fixSide() {
-            return "SELL".equalsIgnoreCase(side) ? Side.SELL : Side.BUY;
-        }
-
-        char fixTimeInForce() {
-            return switch (timeInForce.toUpperCase(Locale.US)) {
-                case "IOC" -> TimeInForce.IMMEDIATE_OR_CANCEL;
-                case "FOK" -> TimeInForce.FILL_OR_KILL;
-                default -> TimeInForce.DAY;
-            };
-        }
-    }
-
     private record EventItem(Instant timestamp, String level, String title, String detail) {
         JsonObject toJson() {
             return new JsonObject()
@@ -599,7 +693,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
             this.leavesQty = quantity;
         }
 
-        static OrderView submitted(String clOrdId, OrderRequest request, boolean autoFlow) {
+        static OrderView submitted(String clOrdId, TheFixOrderRequest request, boolean autoFlow) {
             return new OrderView(clOrdId, request.symbol(), request.side(), request.quantity(), request.price(), autoFlow);
         }
 
@@ -658,6 +752,8 @@ final class TheFixClientFixService implements Application, AutoCloseable {
                     .put("side", side)
                     .put("quantity", quantity)
                     .put("limitPrice", String.format(Locale.US, "%.2f", limitPrice))
+                    .put("market", "")
+                    .put("currency", "")
                     .put("status", status)
                     .put("execType", execType)
                     .put("cumQty", String.format(Locale.US, "%.0f", cumQty))

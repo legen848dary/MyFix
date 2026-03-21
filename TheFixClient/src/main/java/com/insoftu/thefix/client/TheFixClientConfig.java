@@ -28,7 +28,7 @@ record TheFixClientConfig(
                 resolveString("thefix.fix.host", "THEFIX_FIX_HOST", "fix.demo.host", "FIX_CLIENT_HOST", "localhost"),
                 resolvePositiveInt("thefix.fix.port", "THEFIX_FIX_PORT", "fix.demo.port", "FIX_CLIENT_PORT", 9880),
                 resolveString("thefix.fix.beginString", "THEFIX_FIX_BEGIN_STRING", "fix.demo.beginString", "FIX_CLIENT_BEGIN_STRING", "FIX.4.4"),
-                resolveString("thefix.fix.senderCompId", "THEFIX_FIX_SENDER_COMP_ID", "fix.demo.senderCompId", "FIX_CLIENT_SENDER_COMP_ID", "HSBC_TRDR01"),
+                resolveString("thefix.fix.senderCompId", "THEFIX_FIX_SENDER_COMP_ID", "fix.demo.senderCompId", "FIX_CLIENT_SENDER_COMP_ID", "THEFIX_TRDR01"),
                 resolveString("thefix.fix.targetCompId", "THEFIX_FIX_TARGET_COMP_ID", "fix.demo.targetCompId", "FIX_CLIENT_TARGET_COMP_ID", "LLEXSIM"),
                 resolveString("thefix.fix.defaultApplVerId", "THEFIX_FIX_DEFAULT_APPL_VER_ID", "fix.demo.defaultApplVerId", "FIX_CLIENT_DEFAULT_APPL_VER_ID", "FIX.4.4"),
                 resolvePositiveInt("thefix.fix.heartBtInt", "THEFIX_FIX_HEARTBTINT", "fix.demo.heartBtInt", "FIX_CLIENT_HEARTBTINT", 30),

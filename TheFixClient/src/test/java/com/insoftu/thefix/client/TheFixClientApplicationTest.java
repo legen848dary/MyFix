@@ -16,7 +16,7 @@ class TheFixClientApplicationTest {
                         "localhost",
                         9880,
                         "FIX.4.4",
-                        "HSBC_TRDR01",
+                        "THEFIX_TRDR01",
                         "LLEXSIM",
                         "FIX.4.4",
                         30,
