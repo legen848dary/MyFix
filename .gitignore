@@ -44,5 +44,6 @@ bin/
 .DS_Store
 
 ### Runtime artifacts ###
+logs/
 TheFixClient/logs/
 TheFixSimulator/logs/
