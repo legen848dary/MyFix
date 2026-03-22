@@ -984,18 +984,61 @@ createApp({
       settingsInitialized.value = true
     }
 
+    const shouldKeepConnectPending = (nextSession) => {
+      const normalizedStatus = String(nextSession?.status || '').trim().toLowerCase()
+      if (nextSession?.connected) {
+        return false
+      }
+      return normalizedStatus.includes('connect')
+    }
+
+    const shouldClearConnectPending = (nextSession) => {
+      const normalizedStatus = String(nextSession?.status || '').trim().toLowerCase()
+      if (nextSession?.connected) {
+        return true
+      }
+      return normalizedStatus === 'error' || normalizedStatus === 'standby'
+    }
+
+    const reconcileSessionActionPending = (nextSession = session) => {
+      if (sessionActionPending.value === 'connect') {
+        if (shouldClearConnectPending(nextSession)) {
+          sessionActionPending.value = ''
+          return
+        }
+        if (shouldKeepConnectPending(nextSession)) {
+          session.status = nextSession.status || 'Connecting…'
+          return
+        }
+        sessionActionPending.value = ''
+        return
+      }
+
+      if (sessionActionPending.value === 'disconnect' && !nextSession?.connected) {
+        sessionActionPending.value = ''
+      }
+    }
+
     const applyOverview = (payload, preserveSettingsDraft = true, preservePendingSessionState = false) => {
       Object.assign(overview, {
         applicationName: payload.applicationName
       })
-      if (preservePendingSessionState && sessionActionPending.value) {
+      const nextSession = payload.session || {}
+      const preserveConnectProgress = preservePendingSessionState
+        && sessionActionPending.value === 'connect'
+        && shouldKeepConnectPending(nextSession)
+      const preserveDisconnectProgress = preservePendingSessionState
+        && sessionActionPending.value === 'disconnect'
+        && Boolean(nextSession.connected)
+
+      if (preserveConnectProgress || preserveDisconnectProgress) {
         Object.assign(session, {
-          ...(payload.session || {}),
+          ...nextSession,
           connected: session.connected,
           status: session.status
         })
       } else {
-        Object.assign(session, payload.session || {})
+        Object.assign(session, nextSession)
       }
       Object.assign(kpis, payload.kpis || {})
       Object.assign(referenceData, payload.referenceData || {})
@@ -1012,6 +1055,8 @@ createApp({
       if (payload.settings) {
         applySettings(payload.settings, preserveSettingsDraft)
       }
+
+      reconcileSessionActionPending(nextSession)
 
       apiStatus.value = 'Live'
     }
@@ -1247,7 +1292,11 @@ createApp({
       try {
         await work()
       } finally {
-        sessionActionPending.value = ''
+        if (name === 'disconnect') {
+          sessionActionPending.value = ''
+        } else {
+          reconcileSessionActionPending(session)
+        }
       }
     }
 

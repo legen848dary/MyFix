@@ -64,6 +64,8 @@ class TheFixClientServerRoutingTest {
         assertTrue(appJsFromAsset.body().contains("'hsbc-dark'"));
         assertTrue(appJsFromAsset.body().contains("toggleThemeMenu"));
         assertTrue(appJsFromAsset.body().contains("toggleRefreshMenu"));
+        assertTrue(appJsFromAsset.body().contains("reconcileSessionActionPending"));
+        assertTrue(appJsFromAsset.body().contains("shouldKeepConnectPending"));
 
         HttpResponse<String> apiHealth = send(client, "/api/health");
         assertEquals(200, apiHealth.statusCode());
