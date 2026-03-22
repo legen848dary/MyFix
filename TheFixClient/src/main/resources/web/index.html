@@ -38,6 +38,17 @@
       --radius-sm: 10px;
     }
 
+    body[data-theme='light2'] {
+      color-scheme: light;
+      --bg: #ece8e1;
+      --bg-soft: #f5f1ea;
+      --surface: rgba(252, 249, 244, 0.88);
+      --surface-strong: #f8f4ee;
+      --surface-muted: rgba(250, 246, 239, 0.74);
+      --border: rgba(64, 72, 84, 0.14);
+      --border-strong: rgba(64, 72, 84, 0.22);
+    }
+
     body[data-theme='dark'] {
       color-scheme: dark;
       --bg: #0a0f1e;
@@ -731,12 +742,17 @@
     }
 
     .workflow-toolbar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 16px;
+      display: grid;
+      gap: 12px;
       padding: 0 24px;
       margin-top: 4px;
+    }
+
+    .workflow-toolbar__row {
+      display: flex;
+      align-items: end;
+      gap: 12px;
+      justify-content: space-between;
       flex-wrap: wrap;
     }
 
@@ -744,7 +760,6 @@
       display: flex;
       gap: 10px;
       justify-content: flex-end;
-      margin-left: auto;
       flex-wrap: wrap;
     }
 
@@ -753,7 +768,7 @@
       align-items: end;
       gap: 10px;
       flex-wrap: wrap;
-      margin-left: auto;
+      width: 100%;
     }
 
     .template-picker {
@@ -789,6 +804,11 @@
 
     .field--template-name {
       min-width: 240px;
+    }
+
+    .workflow-toolbar__row--actions .tab-bar {
+      padding: 0;
+      margin-top: 0;
     }
 
     .tab {
@@ -1251,7 +1271,7 @@
 </head>
 <body data-theme="dark">
   <div id="app"></div>
-  <script type="module" src="app.js?v=20260322-09"></script>
+  <script type="module" src="app.js?v=20260322-12"></script>
 </body>
 </html>
 

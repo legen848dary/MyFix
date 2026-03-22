@@ -1,6 +1,7 @@
 import { createApp, computed, onMounted, onUnmounted, reactive, ref, watch } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js'
 
 const THEME_STORAGE_KEY = 'thefixclient-theme'
+const THEME_OPTIONS = Object.freeze(['system', 'dark', 'light', 'light2'])
 const REFRESH_FREQUENCY_STORAGE_KEY = 'thefixclient-refresh-frequency'
 const DEFAULT_REFRESH_SECONDS = 3
 const REFRESH_FREQUENCY_OPTIONS = Object.freeze([1, 3, 5])
@@ -111,6 +112,7 @@ createApp({
                 <option value="system">System</option>
                 <option value="dark">Dark</option>
                 <option value="light">Light</option>
+                <option value="light2">Light2</option>
               </select>
             </label>
 
@@ -180,35 +182,39 @@ createApp({
             </div>
 
             <div class="workflow-toolbar">
-              <div class="tab-bar tab-bar--inline">
-                <button class="tab" :class="{ 'tab--active': activeMode === 'single' }" @click="activeMode = 'single'">Single Message</button>
-                <button class="tab" :class="{ 'tab--active': activeMode === 'bulk' }" @click="activeMode = 'bulk'">Bulk NOS</button>
-              </div>
-              <div class="workflow-toolbar__templates">
-                <label class="template-picker" aria-label="Saved FIX message templates">
-                  <span class="template-picker__label">Saved templates</span>
-                  <select v-model="selectedTemplateId" class="template-picker__control" @change="applySelectedTemplate">
-                    <option value="">Select template</option>
-                    <option v-for="template in messageTemplates" :key="template.id" :value="String(template.id)">
-                      {{ template.name }}
-                    </option>
-                  </select>
-                </label>
-                <div class="field field--template-name">
-                  <span class="field__label">Template name</span>
-                  <input v-model="templateNameDraft" placeholder="Growth buy USD limit" />
+              <div class="workflow-toolbar__row workflow-toolbar__row--templates">
+                <div class="workflow-toolbar__templates">
+                  <label class="template-picker" aria-label="Saved FIX message templates">
+                    <span class="template-picker__label">Saved templates</span>
+                    <select v-model="selectedTemplateId" class="template-picker__control" @change="applySelectedTemplate">
+                      <option value="">Select template</option>
+                      <option v-for="template in messageTemplates" :key="template.id" :value="String(template.id)">
+                        {{ template.name }}
+                      </option>
+                    </select>
+                  </label>
+                  <div class="field field--template-name">
+                    <span class="field__label">Template name</span>
+                    <input v-model="templateNameDraft" placeholder="Growth buy USD limit" />
+                  </div>
+                  <button class="button button--soft" @click="saveCurrentTemplate" :disabled="busyAction === 'save-template'">
+                    {{ busyAction === 'save-template' ? 'Saving…' : 'Save template' }}
+                  </button>
                 </div>
-                <button class="button button--soft" @click="saveCurrentTemplate" :disabled="busyAction === 'save-template'">
-                  {{ busyAction === 'save-template' ? 'Saving…' : 'Save template' }}
-                </button>
               </div>
-              <div class="workflow-toolbar__actions">
-                <button v-if="activeMode === 'single'" class="button button--primary" @click="sendTicket" :disabled="busyAction === 'send'">Send FIX message</button>
-                <template v-else-if="selectedMessageType?.supportsBulk">
-                  <button class="button button--primary" @click="startBulkFlow" :disabled="busyAction === 'flow-start'">Start bulk flow</button>
-                  <button class="button button--ghost" @click="stopBulkFlow" :disabled="busyAction === 'flow-stop'">Stop bulk flow</button>
-                </template>
-                <span v-else class="chip">Bulk flow supports NOS only</span>
+              <div class="workflow-toolbar__row workflow-toolbar__row--actions">
+                <div class="tab-bar tab-bar--inline">
+                  <button class="tab" :class="{ 'tab--active': activeMode === 'single' }" @click="activeMode = 'single'">Single Message</button>
+                  <button class="tab" :class="{ 'tab--active': activeMode === 'bulk' }" @click="activeMode = 'bulk'">Bulk NOS</button>
+                </div>
+                <div class="workflow-toolbar__actions">
+                  <button v-if="activeMode === 'single'" class="button button--primary" @click="sendTicket" :disabled="busyAction === 'send'">Send FIX message</button>
+                  <template v-else-if="selectedMessageType?.supportsBulk">
+                    <button class="button button--primary" @click="startBulkFlow" :disabled="busyAction === 'flow-start'">Start bulk flow</button>
+                    <button class="button button--ghost" @click="stopBulkFlow" :disabled="busyAction === 'flow-stop'">Stop bulk flow</button>
+                  </template>
+                  <span v-else class="chip">Bulk flow supports NOS only</span>
+                </div>
               </div>
             </div>
 
@@ -637,7 +643,8 @@ createApp({
     const activePage = ref(pageCodeFromPath(window.location.pathname) || 'order-input')
     const activeMode = ref('single')
     const menuOpen = ref(false)
-    const theme = ref(window.localStorage.getItem(THEME_STORAGE_KEY) || 'system')
+    const normalizeTheme = (value) => THEME_OPTIONS.includes(value) ? value : 'system'
+    const theme = ref(normalizeTheme(window.localStorage.getItem(THEME_STORAGE_KEY) || 'system'))
     const refreshFrequencyByPage = reactive(loadRefreshFrequencyMap())
     const draftInitialized = ref(false)
     const settingsInitialized = ref(false)
@@ -787,8 +794,9 @@ createApp({
       const effectiveTheme = nextTheme === 'system' && themeMediaQuery
         ? (themeMediaQuery.matches ? 'dark' : 'light')
         : nextTheme
-      document.body.setAttribute('data-theme', effectiveTheme === 'light' ? 'light' : 'dark')
-      window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme)
+      const normalizedTheme = normalizeTheme(nextTheme)
+      document.body.setAttribute('data-theme', normalizeTheme(effectiveTheme))
+      window.localStorage.setItem(THEME_STORAGE_KEY, normalizedTheme)
     }
 
     const handleSystemThemeChange = () => {
