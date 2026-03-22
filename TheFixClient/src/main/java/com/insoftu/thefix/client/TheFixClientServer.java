@@ -55,6 +55,8 @@ final class TheFixClientServer {
         router.post("/api/templates/save").handler(ctx -> writeJson(ctx.response(), workbenchState.saveMessageTemplate(bodyJson(ctx))));
         router.post("/api/order-ticket/preview").handler(ctx -> writeJson(ctx.response(), workbenchState.previewOrder(bodyJson(ctx))));
         router.post("/api/order-ticket/send").handler(ctx -> writeJson(ctx.response(), workbenchState.sendOrder(bodyJson(ctx))));
+        router.post("/api/orders/amend").handler(ctx -> writeJson(ctx.response(), workbenchState.amendBlotterOrder(bodyJson(ctx))));
+        router.post("/api/orders/cancel").handler(ctx -> writeJson(ctx.response(), workbenchState.cancelBlotterOrder(bodyJson(ctx))));
         router.post("/api/order-flow/start").handler(ctx -> writeJson(ctx.response(), workbenchState.startOrderFlow(bodyJson(ctx))));
         router.post("/api/order-flow/stop").handler(ctx -> writeJson(ctx.response(), workbenchState.stopOrderFlow()));
 

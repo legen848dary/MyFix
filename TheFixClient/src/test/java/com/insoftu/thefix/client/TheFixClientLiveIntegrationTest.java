@@ -114,6 +114,53 @@ class TheFixClientLiveIntegrationTest {
                 "Expected burst bulk flow to stop itself after reaching totalOrders");
     }
 
+    @Test
+    @Timeout(30)
+    void workstationCanAmendAndCancelOrdersFromTheBlotter() throws Exception {
+        state = createLiveState();
+
+        state.connect();
+        assertTrue(waitFor(() -> state.snapshot().getJsonObject("session").getBoolean("connected"), Duration.ofSeconds(10)),
+                "Expected TheFixClient to log on to the simulator acceptor");
+
+        state.sendOrder(new JsonObject()
+                .put("symbol", "AAPL")
+                .put("side", "BUY")
+                .put("quantity", 100)
+                .put("price", 100.25)
+                .put("timeInForce", "DAY"));
+
+        assertTrue(waitFor(() -> !state.snapshot().getJsonArray("recentOrders").isEmpty(), Duration.ofSeconds(10)),
+                "Expected the blotter to contain the submitted order");
+
+        JsonObject submittedOrder = state.snapshot().getJsonArray("recentOrders").getJsonObject(0);
+        String originalClOrdId = submittedOrder.getString("clOrdId");
+
+        JsonObject amendResponse = state.amendBlotterOrder(new JsonObject()
+                .put("clOrdId", originalClOrdId)
+                .put("quantity", 120)
+                .put("price", 101.25));
+        assertTrue(amendResponse.getJsonObject("actionResult").getBoolean("success"));
+        assertTrue(waitFor(() -> {
+            JsonObject order = state.snapshot().getJsonArray("recentOrders").getJsonObject(0);
+            return Integer.toString(120).equals(order.getValue("quantity").toString())
+                    && "101.25".equals(order.getString("limitPrice"));
+        }, Duration.ofSeconds(10)), "Expected the blotter order to reflect the amended quantity and price");
+
+        String amendedClOrdId = state.snapshot().getJsonArray("recentOrders").getJsonObject(0).getString("clOrdId");
+        JsonObject cancelResponse = state.cancelBlotterOrder(new JsonObject().put("clOrdId", amendedClOrdId));
+        assertTrue(cancelResponse.getJsonObject("actionResult").getBoolean("success"));
+        assertTrue(waitFor(() -> {
+            for (Object item : state.snapshot().getJsonArray("recentOrders")) {
+                JsonObject order = (JsonObject) item;
+                if (amendedClOrdId.equals(order.getString("clOrdId"))) {
+                    return false;
+                }
+            }
+            return true;
+        }, Duration.ofSeconds(10)), "Expected the amended order to be removed from the blotter after cancellation");
+    }
+
     private TheFixClientWorkbenchState createLiveState() throws Exception {
         int fixPort = findFreePort();
         int webPort = findFreePort();

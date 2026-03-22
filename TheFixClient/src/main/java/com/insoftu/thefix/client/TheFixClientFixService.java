@@ -51,10 +51,12 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Executors;
@@ -87,6 +89,8 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     });
     private final Deque<EventItem> recentEvents = new ArrayDeque<>();
     private final LinkedHashMap<String, OrderView> recentOrders = new LinkedHashMap<>();
+    private final Map<String, String> clOrdIdAliases = new HashMap<>();
+    private final Set<String> hiddenClOrdIds = new HashSet<>();
 
     private SocketInitiator initiator;
     private ScheduledFuture<?> autoFlowFuture;
@@ -216,6 +220,52 @@ final class TheFixClientFixService implements Application, AutoCloseable {
 
     synchronized void sendOrder(TheFixOrderRequest request) {
         sendOrderInternal(request, false, true);
+    }
+
+    synchronized boolean amendOrder(String clOrdId, int quantity, double price) {
+        OrderView orderView = findTrackedOrder(clOrdId);
+        if (orderView == null) {
+            addEvent("WARN", "Amend unavailable", "The selected order could not be found in the blotter.");
+            return false;
+        }
+        if (!orderView.canAmend()) {
+            addEvent("WARN", "Amend unavailable", "This order can no longer be amended.");
+            return false;
+        }
+        String priorClOrdId = orderView.clOrdId;
+        String outboundClOrdId = nextClOrdId("AMEND");
+        TheFixOrderRequest request = orderView.toAmendRequest(quantity, price);
+        if (!sendBlotterAction(outboundClOrdId, request, "Order amend sent", "Submitted amend for " + priorClOrdId + " as " + outboundClOrdId + '.')) {
+            return false;
+        }
+        recentOrders.remove(priorClOrdId);
+        clOrdIdAliases.put(priorClOrdId, outboundClOrdId);
+        orderView.applyAmendSubmission(outboundClOrdId, quantity, price);
+        rememberOrder(orderView);
+        return true;
+    }
+
+    synchronized boolean cancelOrder(String clOrdId) {
+        OrderView orderView = findTrackedOrder(clOrdId);
+        if (orderView == null) {
+            addEvent("WARN", "Cancel unavailable", "The selected order could not be found in the blotter.");
+            return false;
+        }
+        if (!orderView.canCancel()) {
+            addEvent("WARN", "Cancel unavailable", "This order can no longer be cancelled.");
+            return false;
+        }
+        String currentClOrdId = orderView.clOrdId;
+        String outboundClOrdId = nextClOrdId("CANCEL");
+        TheFixOrderRequest request = orderView.toCancelRequest();
+        if (!sendBlotterAction(outboundClOrdId, request, "Order cancel sent", "Submitted cancel for " + currentClOrdId + " as " + outboundClOrdId + '.')) {
+            return false;
+        }
+        recentOrders.remove(currentClOrdId);
+        hiddenClOrdIds.add(currentClOrdId);
+        hiddenClOrdIds.add(outboundClOrdId);
+        addEvent("INFO", "Order removed", "Removed " + currentClOrdId + " from the blotter after cancellation.");
+        return true;
     }
 
     synchronized JsonObject sessionSnapshot() {
@@ -424,6 +474,44 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         }
     }
 
+    private boolean sendBlotterAction(String outboundClOrdId, TheFixOrderRequest request, String successTitle, String successDetail) {
+        SessionID sessionId = activeSessionId.get();
+        if (!loggedOn || sessionId == null) {
+            sendFailureCount.incrementAndGet();
+            addEvent("WARN", "Order blocked", "No active FIX session is logged on. Prime the session first.");
+            return false;
+        }
+
+        @SuppressWarnings("resource")
+        Session quickFixSession = Session.lookupSession(sessionId);
+        if (quickFixSession == null || !quickFixSession.isLoggedOn()) {
+            sendFailureCount.incrementAndGet();
+            addEvent("WARN", "Order blocked", "QuickFIX/J session is not logged on yet.");
+            return false;
+        }
+
+        try {
+            boolean sent = Session.sendToTarget(buildOutboundMessage(outboundClOrdId, request), sessionId);
+            if (!sent) {
+                sendFailureCount.incrementAndGet();
+                addEvent("WARN", "Order send failed", "The simulator session rejected the outbound send attempt for " + outboundClOrdId + '.');
+                return false;
+            }
+            sentCount.incrementAndGet();
+            addEvent("SUCCESS", successTitle, successDetail);
+            return true;
+        } catch (SessionNotFound exception) {
+            sendFailureCount.incrementAndGet();
+            addEvent("WARN", "Session unavailable", "Unable to route order because the FIX session could not be found.");
+            return false;
+        } catch (Exception exception) {
+            sendFailureCount.incrementAndGet();
+            addEvent("WARN", "Unexpected send error", rootMessage(exception));
+            log.warn("Unexpected blotter action send failure", exception);
+            return false;
+        }
+    }
+
     private void handleExecutionReport(Message message) {
         boolean rejectedExecutionReport = isRejectedExecutionReport(message);
         if (rejectedExecutionReport) {
@@ -431,7 +519,11 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         } else {
             execReportCount.incrementAndGet();
         }
-        String clOrdId = safeString(message, ClOrdID.FIELD, "UNKNOWN");
+        String rawClOrdId = safeString(message, ClOrdID.FIELD, "UNKNOWN");
+        String clOrdId = resolveTrackedClOrdId(rawClOrdId);
+        if (hiddenClOrdIds.contains(clOrdId)) {
+            return;
+        }
         OrderView orderView = recentOrders.computeIfAbsent(clOrdId, ignored -> OrderView.fromExecution(message));
         orderView.updateFromExecutionReport(message);
         trimOrders();
@@ -442,7 +534,10 @@ final class TheFixClientFixService implements Application, AutoCloseable {
 
     private void handleReject(Message message, String messageType) {
         rejectCount.incrementAndGet();
-        String clOrdId = safeString(message, ClOrdID.FIELD, "REJECT-" + sequence.incrementAndGet());
+        String clOrdId = resolveTrackedClOrdId(safeString(message, ClOrdID.FIELD, "REJECT-" + sequence.incrementAndGet()));
+        if (hiddenClOrdIds.contains(clOrdId)) {
+            return;
+        }
         OrderView orderView = recentOrders.computeIfAbsent(clOrdId, ignored -> OrderView.rejected(clOrdId));
         String reason = safeString(message, Text.FIELD, messageType.equals(MsgType.BUSINESS_MESSAGE_REJECT)
                 ? "Business message reject"
@@ -472,6 +567,23 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     private void rememberOrder(OrderView orderView) {
         recentOrders.put(orderView.clOrdId, orderView);
         trimOrders();
+    }
+
+    private OrderView findTrackedOrder(String clOrdId) {
+        String resolvedClOrdId = resolveTrackedClOrdId(clOrdId);
+        return recentOrders.get(resolvedClOrdId);
+    }
+
+    private String resolveTrackedClOrdId(String clOrdId) {
+        if (clOrdId == null || clOrdId.isBlank()) {
+            return clOrdId;
+        }
+        String resolved = clOrdId;
+        Set<String> seen = new HashSet<>();
+        while (clOrdIdAliases.containsKey(resolved) && seen.add(resolved)) {
+            resolved = clOrdIdAliases.get(resolved);
+        }
+        return resolved;
     }
 
     private void trimOrders() {
@@ -726,14 +838,23 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     }
 
     private static final class OrderView {
-        private final String clOrdId;
+        private String clOrdId;
         private final String symbol;
         private final String side;
         private final String messageType;
+        private final String messageTypeCode;
         private final boolean autoFlow;
         private final Instant createdAt;
-        private final int quantity;
-        private final double limitPrice;
+        private int quantity;
+        private double limitPrice;
+        private final double stopPrice;
+        private final String timeInForce;
+        private final String orderType;
+        private final String priceType;
+        private final String region;
+        private final String market;
+        private final String currency;
+        private final List<TheFixTagEntry> additionalTags;
 
         private String status;
         private String execType;
@@ -742,13 +863,37 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         private double leavesQty;
         private double avgPx;
 
-        private OrderView(String clOrdId, String symbol, String side, String messageType, int quantity, double limitPrice, boolean autoFlow) {
+        private OrderView(String clOrdId,
+                          String symbol,
+                          String side,
+                          String messageType,
+                          String messageTypeCode,
+                          int quantity,
+                          double limitPrice,
+                          double stopPrice,
+                          String timeInForce,
+                          String orderType,
+                          String priceType,
+                          String region,
+                          String market,
+                          String currency,
+                          List<TheFixTagEntry> additionalTags,
+                          boolean autoFlow) {
             this.clOrdId = clOrdId;
             this.symbol = symbol;
             this.side = side;
             this.messageType = messageType;
+            this.messageTypeCode = messageTypeCode;
             this.quantity = quantity;
             this.limitPrice = limitPrice;
+            this.stopPrice = stopPrice;
+            this.timeInForce = timeInForce;
+            this.orderType = orderType;
+            this.priceType = priceType;
+            this.region = region;
+            this.market = market;
+            this.currency = currency;
+            this.additionalTags = additionalTags == null ? List.of() : List.copyOf(additionalTags);
             this.autoFlow = autoFlow;
             this.createdAt = Instant.now();
             this.status = "Pending";
@@ -758,7 +903,24 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         }
 
         static OrderView submitted(String clOrdId, TheFixOrderRequest request, boolean autoFlow) {
-            return new OrderView(clOrdId, request.symbol(), request.side(), request.messageType().shortLabel(), request.quantity(), request.price(), autoFlow);
+            return new OrderView(
+                    clOrdId,
+                    request.symbol(),
+                    request.side(),
+                    request.messageType().shortLabel(),
+                    request.messageTypeCode(),
+                    request.quantity(),
+                    request.price(),
+                    request.stopPrice(),
+                    request.timeInForce(),
+                    request.orderType(),
+                    request.priceType(),
+                    request.region(),
+                    request.market(),
+                    request.currency(),
+                    request.additionalTags(),
+                    autoFlow
+            );
         }
 
         static OrderView fromExecution(Message message) {
@@ -767,14 +929,23 @@ final class TheFixClientFixService implements Application, AutoCloseable {
                     safeString(message, Symbol.FIELD, "UNKNOWN"),
                     sideLabel(safeString(message, Side.FIELD, "1")),
                     "EXEC",
+                    TheFixMessageType.NEW_ORDER_SINGLE.code(),
                     (int) Math.round(safeDouble(message, OrderQty.FIELD, 0d)),
                     safeDouble(message, Price.FIELD, 0d),
+                    safeDouble(message, StopPx.FIELD, 0d),
+                    "DAY",
+                    "LIMIT",
+                    "PER_UNIT",
+                    "AMERICAS",
+                    safeString(message, SecurityExchange.FIELD, "XNAS"),
+                    safeString(message, Currency.FIELD, "USD"),
+                    List.of(),
                     false
             );
         }
 
         static OrderView rejected(String clOrdId) {
-            return new OrderView(clOrdId, "UNKNOWN", "BUY", "REJECT", 0, 0d, false);
+            return new OrderView(clOrdId, "UNKNOWN", "BUY", "REJECT", TheFixMessageType.NEW_ORDER_SINGLE.code(), 0, 0d, 0d, "DAY", "LIMIT", "PER_UNIT", "AMERICAS", "XNAS", "USD", List.of(), false);
         }
 
         void markSent() {
@@ -805,6 +976,67 @@ final class TheFixClientFixService implements Application, AutoCloseable {
             this.avgPx = safeDouble(message, AvgPx.FIELD, avgPx);
         }
 
+        void applyAmendSubmission(String nextClOrdId, int nextQuantity, double nextPrice) {
+            this.clOrdId = nextClOrdId;
+            this.quantity = nextQuantity;
+            this.limitPrice = nextPrice;
+            this.status = "Pending Amend";
+            this.execType = "Pending";
+            this.note = "Amend submitted";
+            this.leavesQty = nextQuantity;
+            this.cumQty = 0d;
+            this.avgPx = 0d;
+        }
+
+        boolean canAmend() {
+            return !terminal() && !TheFixMessageType.ORDER_CANCEL_REQUEST.code().equals(messageTypeCode);
+        }
+
+        boolean canCancel() {
+            return !terminal() && !TheFixMessageType.ORDER_CANCEL_REQUEST.code().equals(messageTypeCode);
+        }
+
+        TheFixOrderRequest toAmendRequest(int nextQuantity, double nextPrice) {
+            return new TheFixOrderRequest(
+                    TheFixMessageType.ORDER_CANCEL_REPLACE_REQUEST.code(),
+                    "",
+                    clOrdId,
+                    symbol,
+                    side,
+                    nextQuantity,
+                    nextPrice,
+                    stopPrice,
+                    timeInForce,
+                    orderType,
+                    priceType,
+                    region,
+                    market,
+                    currency,
+                    additionalTags
+            );
+        }
+
+        TheFixOrderRequest toCancelRequest() {
+            int requestQuantity = leavesQty > 0d ? (int) Math.round(leavesQty) : quantity;
+            return new TheFixOrderRequest(
+                    TheFixMessageType.ORDER_CANCEL_REQUEST.code(),
+                    "",
+                    clOrdId,
+                    symbol,
+                    side,
+                    Math.max(requestQuantity, 0),
+                    limitPrice,
+                    stopPrice,
+                    timeInForce,
+                    orderType,
+                    priceType,
+                    region,
+                    market,
+                    currency,
+                    List.of()
+            );
+        }
+
         boolean terminal() {
             return List.of("Filled", "Cancelled", "Rejected").contains(status);
         }
@@ -826,7 +1058,9 @@ final class TheFixClientFixService implements Application, AutoCloseable {
                     .put("leavesQty", String.format(Locale.US, "%.0f", leavesQty))
                     .put("avgPx", avgPx > 0d ? String.format(Locale.US, "%.2f", avgPx) : "—")
                     .put("note", note)
-                    .put("source", autoFlow ? "Auto flow" : "Manual");
+                    .put("source", autoFlow ? "Auto flow" : "Manual")
+                    .put("canAmend", canAmend())
+                    .put("canCancel", canCancel());
         }
 
         private static String ordStatusLabel(String raw) {

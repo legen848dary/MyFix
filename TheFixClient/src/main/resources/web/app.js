@@ -427,6 +427,7 @@ createApp({
                       <th class="text-left">Status</th>
                       <th class="text-left">Behavior</th>
                       <th class="text-right">ClOrdID</th>
+                      <th class="text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -444,9 +445,13 @@ createApp({
                       <td :class="blotterStatusClass(order.status)">{{ order.status }}</td>
                       <td :class="blotterSourceClass(order.source)">{{ order.source }}</td>
                       <td class="mono text-right text-slate-300">{{ order.clOrdId }}</td>
+                      <td class="orders-table__actions">
+                        <button class="button button--soft button--table" @click="openAmendModal(order)" :disabled="!order.canAmend || busyAction === 'order-amend'">Amend</button>
+                        <button class="button button--ghost button--table button--danger-outline" @click="openCancelDialog(order)" :disabled="!order.canCancel || busyAction === 'order-cancel'">Cancel</button>
+                      </td>
                     </tr>
                     <tr v-if="!recentOrders.length">
-                      <td colspan="9" class="orders-table__empty">Waiting for orders…</td>
+                      <td colspan="10" class="orders-table__empty">Waiting for orders…</td>
                     </tr>
                   </tbody>
                 </table>
@@ -566,6 +571,53 @@ createApp({
           </article>
         </section>
       </main>
+
+      <div v-if="amendModalOpen" class="modal-backdrop" @click.self="closeAmendModal">
+        <div class="modal-panel">
+          <div class="modal-panel__header">
+            <div>
+              <h3 class="modal-panel__title">Amend order</h3>
+              <p class="modal-panel__copy mono">{{ amendDraft.symbol }} · {{ amendDraft.clOrdId }}</p>
+            </div>
+            <button class="button button--ghost" @click="closeAmendModal">Close</button>
+          </div>
+          <div class="modal-panel__body">
+            <div class="order-grid order-grid--comfortable">
+              <div class="field">
+                <span class="field__label">Quantity</span>
+                <input v-model.number="amendDraft.quantity" type="number" min="1" step="1" />
+              </div>
+              <div class="field">
+                <span class="field__label">Price</span>
+                <input v-model.number="amendDraft.price" type="number" min="0" step="0.01" />
+              </div>
+            </div>
+            <div class="modal-panel__actions">
+              <button class="button button--ghost" @click="closeAmendModal">Discard</button>
+              <button class="button button--primary" @click="submitAmend" :disabled="busyAction === 'order-amend'">
+                {{ busyAction === 'order-amend' ? 'Saving…' : 'Save changes' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="cancelDialogOpen" class="modal-backdrop" @click.self="closeCancelDialog">
+        <div class="modal-panel modal-panel--confirm">
+          <div class="modal-panel__header">
+            <div>
+              <h3 class="modal-panel__title">Cancel order</h3>
+              <p class="modal-panel__copy">Remove {{ cancelTarget?.symbol }} · {{ cancelTarget?.clOrdId }} from the blotter and submit a FIX cancel request?</p>
+            </div>
+          </div>
+          <div class="modal-panel__actions">
+            <button class="button button--ghost" @click="closeCancelDialog">Keep order</button>
+            <button class="button button--danger" @click="submitCancel" :disabled="busyAction === 'order-cancel'">
+              {{ busyAction === 'order-cancel' ? 'Cancelling…' : 'Confirm cancel' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   `,
 
@@ -655,6 +707,16 @@ createApp({
     const selectedSuggestedTagKey = ref('')
     const selectedTemplateId = ref('')
     const templateNameDraft = ref('')
+    const amendModalOpen = ref(false)
+    const cancelDialogOpen = ref(false)
+    const cancelTarget = ref(null)
+
+    const amendDraft = reactive({
+      clOrdId: '',
+      symbol: '',
+      quantity: 0,
+      price: 0
+    })
 
     const orderDraft = reactive({
       messageType: 'NEW_ORDER_SINGLE',
@@ -1025,6 +1087,66 @@ createApp({
       }))
     })
 
+    const openAmendModal = (order) => {
+      amendDraft.clOrdId = order?.clOrdId || ''
+      amendDraft.symbol = order?.symbol || ''
+      amendDraft.quantity = Number(order?.quantity || 0)
+      amendDraft.price = Number(order?.limitPrice || 0)
+      amendModalOpen.value = true
+    }
+
+    const closeAmendModal = () => {
+      amendModalOpen.value = false
+      amendDraft.clOrdId = ''
+      amendDraft.symbol = ''
+      amendDraft.quantity = 0
+      amendDraft.price = 0
+    }
+
+    const submitAmend = async () => runAction('order-amend', async () => {
+      const payload = await apiCall('/api/orders/amend', {
+        method: 'POST',
+        body: JSON.stringify({
+          clOrdId: amendDraft.clOrdId,
+          quantity: Number(amendDraft.quantity || 0),
+          price: Number(amendDraft.price || 0)
+        })
+      })
+      applyOverview(payload, true)
+      if (payload?.actionResult?.success) {
+        closeAmendModal()
+        return
+      }
+      window.alert(payload?.actionResult?.message || 'Unable to amend the selected order.')
+    })
+
+    const openCancelDialog = (order) => {
+      cancelTarget.value = order
+      cancelDialogOpen.value = true
+    }
+
+    const closeCancelDialog = () => {
+      cancelDialogOpen.value = false
+      cancelTarget.value = null
+    }
+
+    const submitCancel = async () => runAction('order-cancel', async () => {
+      if (!cancelTarget.value?.clOrdId) {
+        closeCancelDialog()
+        return
+      }
+      const payload = await apiCall('/api/orders/cancel', {
+        method: 'POST',
+        body: JSON.stringify({ clOrdId: cancelTarget.value.clOrdId })
+      })
+      applyOverview(payload, true)
+      if (payload?.actionResult?.success) {
+        closeCancelDialog()
+        return
+      }
+      window.alert(payload?.actionResult?.message || 'Unable to cancel the selected order.')
+    })
+
     const runOverviewRefreshCycle = async () => {
       await loadOverview()
       queueOverviewRefresh()
@@ -1380,6 +1502,10 @@ createApp({
       selectedSuggestedTagKey,
       selectedTemplateId,
       templateNameDraft,
+      amendModalOpen,
+      cancelDialogOpen,
+      cancelTarget,
+      amendDraft,
       sessionActionBusy,
       sessionButtonLabel,
       execTypeBadge,
@@ -1410,6 +1536,12 @@ createApp({
       removeAdditionalTag,
       applySelectedTemplate,
       saveCurrentTemplate,
+      openAmendModal,
+      closeAmendModal,
+      submitAmend,
+      openCancelDialog,
+      closeCancelDialog,
+      submitCancel,
       onRegionChange,
       onMarketChange,
       toggleMenu,

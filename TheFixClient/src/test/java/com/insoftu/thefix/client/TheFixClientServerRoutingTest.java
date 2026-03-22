@@ -71,6 +71,18 @@ class TheFixClientServerRoutingTest {
         assertEquals(200, saveTemplate.statusCode());
         assertTrue(saveTemplate.body().contains("Routing test template"));
 
+        HttpResponse<String> amendOrder = post(client, "/api/orders/amend", """
+                {"clOrdId":"UNKNOWN","quantity":25,"price":101.10}
+                """);
+        assertEquals(200, amendOrder.statusCode());
+        assertTrue(amendOrder.body().contains("\"actionResult\""));
+
+        HttpResponse<String> cancelOrder = post(client, "/api/orders/cancel", """
+                {"clOrdId":"UNKNOWN"}
+                """);
+        assertEquals(200, cancelOrder.statusCode());
+        assertTrue(cancelOrder.body().contains("\"actionResult\""));
+
         HttpResponse<String> appJs = send(client, "/app.js");
         assertEquals(200, appJs.statusCode());
         assertTrue(appJs.body().contains("createApp({"));

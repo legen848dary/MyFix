@@ -925,6 +925,18 @@
     }
     .button--soft { background: var(--brand-soft); color: var(--brand); border-color: color-mix(in srgb, var(--brand) 20%, transparent); }
     .button--ghost { background: transparent; }
+    .button--danger-outline {
+      color: var(--danger);
+      border-color: color-mix(in srgb, var(--danger) 26%, transparent);
+    }
+    .button--danger-outline:hover {
+      background: var(--danger-soft);
+    }
+    .button--table {
+      padding: 6px 10px;
+      font-size: 11px;
+      min-width: 72px;
+    }
     .button:disabled {
       opacity: 0.45;
       cursor: not-allowed;
@@ -1177,6 +1189,12 @@
       border-bottom: none;
     }
 
+    .orders-table__actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
     .orders-table--simulator thead tr {
       color: var(--text-faint);
       border-bottom: 1px solid #334155;
@@ -1227,6 +1245,75 @@
       line-height: 1.5;
     }
 
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.48);
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      z-index: 60;
+    }
+
+    .modal-panel {
+      width: min(520px, 100%);
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: var(--surface-strong);
+      box-shadow: 0 24px 48px rgba(15, 23, 42, 0.24);
+      overflow: hidden;
+    }
+
+    .modal-panel--confirm {
+      width: min(460px, 100%);
+    }
+
+    .modal-panel__header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .modal-panel__title {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .modal-panel__copy {
+      margin: 8px 0 0;
+      color: var(--text-soft);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .modal-panel__body {
+      padding: 18px 20px 20px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .modal-panel__actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 0 20px 20px;
+      flex-wrap: wrap;
+    }
+
+    .modal-panel .modal-panel__body + .modal-panel__actions {
+      padding-top: 0;
+    }
+
+    body[data-theme='dark'] .modal-panel {
+      background: #0f172a;
+      border-color: #334155;
+      box-shadow: 0 28px 56px rgba(2, 6, 23, 0.48);
+    }
+
     .market-hint ul {
       margin: 10px 0 0;
       padding-left: 18px;
@@ -1271,7 +1358,7 @@
 </head>
 <body data-theme="dark">
   <div id="app"></div>
-  <script type="module" src="app.js?v=20260322-12"></script>
+  <script type="module" src="app.js?v=20260322-13"></script>
 </body>
 </html>
 

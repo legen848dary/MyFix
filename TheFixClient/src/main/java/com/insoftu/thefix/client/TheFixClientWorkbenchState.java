@@ -144,6 +144,28 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         return snapshot();
     }
 
+    synchronized JsonObject amendBlotterOrder(JsonObject request) {
+        String clOrdId = request == null ? null : request.getString("clOrdId");
+        int quantity = request == null ? 0 : parseInt(request, "quantity", 0);
+        double price = resolveDouble(request, "price", 0d);
+        boolean success = clOrdId != null && !clOrdId.isBlank() && quantity > 0 && price >= 0d && fixService.amendOrder(clOrdId, quantity, price);
+        return snapshot().put("actionResult", new JsonObject()
+                .put("success", success)
+                .put("type", "amend")
+                .put("clOrdId", clOrdId == null ? "" : clOrdId)
+                .put("message", success ? "Order amend submitted." : "Unable to amend the selected order."));
+    }
+
+    synchronized JsonObject cancelBlotterOrder(JsonObject request) {
+        String clOrdId = request == null ? null : request.getString("clOrdId");
+        boolean success = clOrdId != null && !clOrdId.isBlank() && fixService.cancelOrder(clOrdId);
+        return snapshot().put("actionResult", new JsonObject()
+                .put("success", success)
+                .put("type", "cancel")
+                .put("clOrdId", clOrdId == null ? "" : clOrdId)
+                .put("message", success ? "Order cancel submitted." : "Unable to cancel the selected order."));
+    }
+
     synchronized JsonObject startOrderFlow(JsonObject request) {
         OrderPreview preview = buildPreview(request);
         if (!preview.warnings().isEmpty() || !preview.toOrderRequest().messageType().supportsBulk()) {

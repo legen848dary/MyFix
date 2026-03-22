@@ -1,0 +1,21 @@
+{
+  "activeProfileName" : "Default profile",
+  "profiles" : [ {
+    "name" : "Default profile",
+    "senderCompId" : "THEFIX_TRDR01",
+    "targetCompId" : "LLEXSIM",
+    "fixHost" : "localhost",
+    "fixPort" : 9880,
+    "fixVersionCode" : "FIX_44",
+    "fixVersionLabel" : "FIX 4.4",
+    "beginString" : "FIX.4.4",
+    "defaultApplVerId" : "FIX.4.4",
+    "resetOnLogon" : true,
+    "sessionStartTime" : "00:00:00",
+    "sessionEndTime" : "00:00:00",
+    "heartBtIntSec" : 30,
+    "reconnectIntervalSec" : 5,
+    "quickFixLogDir" : "logs/thefixclient/quickfixj",
+    "rawMessageLoggingEnabled" : false
+  } ]
+}
