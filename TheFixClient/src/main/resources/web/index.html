@@ -75,6 +75,32 @@
       --shadow: 0 22px 48px rgba(2, 6, 23, 0.42);
     }
 
+    body[data-theme='hsbc-dark'] {
+      color-scheme: dark;
+      --bg: #05070b;
+      --bg-soft: #0b1017;
+      --surface: rgba(14, 18, 24, 0.96);
+      --surface-strong: #11161d;
+      --surface-muted: rgba(24, 30, 40, 0.84);
+      --border: rgba(68, 78, 93, 0.92);
+      --border-strong: rgba(92, 105, 122, 0.98);
+      --text: #f5f7fa;
+      --text-soft: #d3d9e2;
+      --text-faint: #9aa6b8;
+      --brand: #db0011;
+      --brand-strong: #8f0010;
+      --brand-soft: rgba(219, 0, 17, 0.18);
+      --danger: #ff7b86;
+      --danger-soft: rgba(255, 123, 134, 0.18);
+      --success: #52d48f;
+      --success-soft: rgba(82, 212, 143, 0.16);
+      --warn: #f7c948;
+      --warn-soft: rgba(247, 201, 72, 0.16);
+      --info: #68c4ff;
+      --info-soft: rgba(104, 196, 255, 0.16);
+      --shadow: 0 24px 54px rgba(0, 0, 0, 0.46);
+    }
+
     * { box-sizing: border-box; }
     html, body { min-height: 100%; }
     body {
@@ -89,6 +115,10 @@
 
     body[data-theme='dark'] {
       background: #0a0f1e;
+    }
+
+    body[data-theme='hsbc-dark'] {
+      background: #05070b;
     }
 
     button, input, select {
@@ -108,6 +138,14 @@
     body[data-theme='dark'] ::-webkit-scrollbar-track { background: #1e293b; }
     body[data-theme='dark'] ::-webkit-scrollbar-thumb {
       background: #334155;
+      border-radius: 999px;
+      border: 0;
+    }
+
+    body[data-theme='hsbc-dark'] ::-webkit-scrollbar { width: 6px; height: 6px; }
+    body[data-theme='hsbc-dark'] ::-webkit-scrollbar-track { background: #171d26; }
+    body[data-theme='hsbc-dark'] ::-webkit-scrollbar-thumb {
+      background: #5c0b15;
       border-radius: 999px;
       border: 0;
     }
@@ -356,23 +394,36 @@
     .status-indicator--idle { color: var(--text-faint); }
 
     body[data-theme='dark'] .topbar,
-    body[data-theme='dark'] .panel {
+    body[data-theme='dark'] .panel,
+    body[data-theme='hsbc-dark'] .topbar,
+    body[data-theme='hsbc-dark'] .panel {
       backdrop-filter: none;
     }
 
-    body[data-theme='dark'] .topbar {
+    body[data-theme='dark'] .topbar,
+    body[data-theme='hsbc-dark'] .topbar {
       background: #0f172a;
       border-color: var(--border);
       box-shadow: none;
     }
 
-    body[data-theme='dark'] .panel {
+    body[data-theme='hsbc-dark'] .topbar {
+      background: #11161d;
+    }
+
+    body[data-theme='dark'] .panel,
+    body[data-theme='hsbc-dark'] .panel {
       background: #0f172a;
       border-color: var(--border);
       box-shadow: none;
     }
 
-    body[data-theme='dark'] .panel--subtle {
+    body[data-theme='hsbc-dark'] .panel {
+      background: #11161d;
+    }
+
+    body[data-theme='dark'] .panel--subtle,
+    body[data-theme='hsbc-dark'] .panel--subtle {
       background: transparent;
       box-shadow: none;
     }
@@ -385,95 +436,155 @@
     body[data-theme='dark'] .order-row,
     body[data-theme='dark'] .market-hint,
     body[data-theme='dark'] .orders-table__scroll,
-    body[data-theme='dark'] .empty-state {
+    body[data-theme='dark'] .empty-state,
+    body[data-theme='hsbc-dark'] .menu-button,
+    body[data-theme='hsbc-dark'] .theme-select,
+    body[data-theme='hsbc-dark'] .compact-card,
+    body[data-theme='hsbc-dark'] .segmented,
+    body[data-theme='hsbc-dark'] .event,
+    body[data-theme='hsbc-dark'] .order-row,
+    body[data-theme='hsbc-dark'] .market-hint,
+    body[data-theme='hsbc-dark'] .orders-table__scroll,
+    body[data-theme='hsbc-dark'] .empty-state {
       background: #1e293b;
       border-color: var(--border);
       box-shadow: none;
     }
 
-    body[data-theme='dark'] .menu-panel {
+    body[data-theme='hsbc-dark'] .menu-button,
+    body[data-theme='hsbc-dark'] .theme-select,
+    body[data-theme='hsbc-dark'] .compact-card,
+    body[data-theme='hsbc-dark'] .segmented,
+    body[data-theme='hsbc-dark'] .event,
+    body[data-theme='hsbc-dark'] .order-row,
+    body[data-theme='hsbc-dark'] .market-hint,
+    body[data-theme='hsbc-dark'] .orders-table__scroll,
+    body[data-theme='hsbc-dark'] .empty-state {
+      background: #171d26;
+    }
+
+    body[data-theme='dark'] .menu-panel,
+    body[data-theme='hsbc-dark'] .menu-panel {
       background: #0f172a;
       border-color: var(--border);
       box-shadow: none;
     }
 
+    body[data-theme='hsbc-dark'] .menu-panel {
+      background: #11161d;
+    }
+
     body[data-theme='dark'] .field input,
-    body[data-theme='dark'] .field select {
+    body[data-theme='dark'] .field select,
+    body[data-theme='hsbc-dark'] .field input,
+    body[data-theme='hsbc-dark'] .field select {
       background: #1e293b;
       border-color: var(--border);
     }
 
-    body[data-theme='dark'] .template-picker__control {
+    body[data-theme='hsbc-dark'] .field input,
+    body[data-theme='hsbc-dark'] .field select {
+      background: #171d26;
+    }
+
+    body[data-theme='dark'] .template-picker__control,
+    body[data-theme='hsbc-dark'] .template-picker__control {
       background: #1e293b;
       border-color: var(--border);
+    }
+
+    body[data-theme='hsbc-dark'] .template-picker__control {
+      background: #171d26;
     }
 
     body[data-theme='dark'] .field input:focus,
-    body[data-theme='dark'] .field select:focus {
+    body[data-theme='dark'] .field select:focus,
+    body[data-theme='hsbc-dark'] .field input:focus,
+    body[data-theme='hsbc-dark'] .field select:focus {
       border-color: color-mix(in srgb, var(--brand) 65%, white);
       box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 18%, transparent);
     }
 
     body[data-theme='dark'] .button,
     body[data-theme='dark'] .tab,
-    body[data-theme='dark'] .segmented__option {
+    body[data-theme='dark'] .segmented__option,
+    body[data-theme='hsbc-dark'] .button,
+    body[data-theme='hsbc-dark'] .tab,
+    body[data-theme='hsbc-dark'] .segmented__option {
       box-shadow: none;
     }
 
-    body[data-theme='dark'] .button {
+    body[data-theme='dark'] .button,
+    body[data-theme='hsbc-dark'] .button {
       background: #1e293b;
       border-color: var(--border);
     }
 
-    body[data-theme='dark'] .button--soft {
+    body[data-theme='hsbc-dark'] .button {
+      background: #171d26;
+    }
+
+    body[data-theme='dark'] .button--soft,
+    body[data-theme='hsbc-dark'] .button--soft {
       background: var(--brand-soft);
       color: var(--brand);
       border-color: color-mix(in srgb, var(--brand) 24%, transparent);
     }
 
-    body[data-theme='dark'] .button--ghost {
+    body[data-theme='dark'] .button--ghost,
+    body[data-theme='hsbc-dark'] .button--ghost {
       background: transparent;
       color: #e2e8f0;
     }
 
-    body[data-theme='dark'] .button--success {
+    body[data-theme='dark'] .button--success,
+    body[data-theme='hsbc-dark'] .button--success {
       background: linear-gradient(135deg, var(--brand), var(--brand-strong));
       border-color: color-mix(in srgb, var(--brand) 36%, transparent);
       color: #ffffff;
       box-shadow: 0 12px 24px color-mix(in srgb, var(--brand) 26%, transparent);
     }
 
-    body[data-theme='dark'] .button--danger {
+    body[data-theme='dark'] .button--danger,
+    body[data-theme='hsbc-dark'] .button--danger {
       background: linear-gradient(135deg, #4a1619, #1b0a0b);
       border-color: rgba(122, 33, 39, 0.9);
       color: #ffffff;
       box-shadow: 0 12px 24px rgba(27, 10, 11, 0.32);
     }
 
-    body[data-theme='dark'] .tab {
+    body[data-theme='dark'] .tab,
+    body[data-theme='hsbc-dark'] .tab {
       background: #0f172a;
       border-color: var(--border);
       color: #cbd5e1;
       opacity: 0.78;
     }
 
-    body[data-theme='dark'] .tab--active {
+    body[data-theme='hsbc-dark'] .tab {
+      background: #11161d;
+    }
+
+    body[data-theme='dark'] .tab--active,
+    body[data-theme='hsbc-dark'] .tab--active {
       background: linear-gradient(135deg, var(--brand), var(--brand-strong));
       color: #ffffff;
       border-color: color-mix(in srgb, var(--brand) 60%, white);
       box-shadow:
-        0 0 0 2px rgba(34, 197, 94, 0.28),
-        0 14px 28px rgba(21, 128, 61, 0.30);
+        0 0 0 2px color-mix(in srgb, var(--brand) 28%, transparent),
+        0 14px 28px color-mix(in srgb, var(--brand) 30%, transparent);
       opacity: 1;
     }
 
-    body[data-theme='dark'] .segmented__option--active {
+    body[data-theme='dark'] .segmented__option--active,
+    body[data-theme='hsbc-dark'] .segmented__option--active {
       background: linear-gradient(135deg, var(--brand), var(--brand-strong));
       border-color: var(--border-strong);
       color: white;
     }
 
-    body[data-theme='dark'] .segmented__option {
+    body[data-theme='dark'] .segmented__option,
+    body[data-theme='hsbc-dark'] .segmented__option {
       color: #cbd5e1;
     }
 
@@ -481,15 +592,37 @@
     body[data-theme='dark'] .tab,
     body[data-theme='dark'] .segmented__option,
     body[data-theme='dark'] .menu-button,
-    body[data-theme='dark'] .theme-select {
+    body[data-theme='dark'] .theme-select,
+    body[data-theme='hsbc-dark'] .button,
+    body[data-theme='hsbc-dark'] .tab,
+    body[data-theme='hsbc-dark'] .segmented__option,
+    body[data-theme='hsbc-dark'] .menu-button,
+    body[data-theme='hsbc-dark'] .theme-select {
       border-color: #334155;
+    }
+
+    body[data-theme='hsbc-dark'] .button,
+    body[data-theme='hsbc-dark'] .tab,
+    body[data-theme='hsbc-dark'] .segmented__option,
+    body[data-theme='hsbc-dark'] .menu-button,
+    body[data-theme='hsbc-dark'] .theme-select {
+      border-color: #465261;
     }
 
     body[data-theme='dark'] .button:not(:disabled):not(.button--primary):not(.button--success):not(.button--danger):hover,
     body[data-theme='dark'] .tab:not(.tab--active):hover,
-    body[data-theme='dark'] .segmented__option:not(.segmented__option--active):hover {
+    body[data-theme='dark'] .segmented__option:not(.segmented__option--active):hover,
+    body[data-theme='hsbc-dark'] .button:not(:disabled):not(.button--primary):not(.button--success):not(.button--danger):hover,
+    body[data-theme='hsbc-dark'] .tab:not(.tab--active):hover,
+    body[data-theme='hsbc-dark'] .segmented__option:not(.segmented__option--active):hover {
       background: #273449;
       color: #f8fafc;
+    }
+
+    body[data-theme='hsbc-dark'] .button:not(:disabled):not(.button--primary):not(.button--success):not(.button--danger):hover,
+    body[data-theme='hsbc-dark'] .tab:not(.tab--active):hover,
+    body[data-theme='hsbc-dark'] .segmented__option:not(.segmented__option--active):hover {
+      background: #202834;
     }
 
     .workspace {
@@ -1118,12 +1251,18 @@
 
     .orders-table__scroll {
       overflow-x: auto;
+      overflow-y: auto;
+      max-height: min(68vh, calc(100vh - 240px));
+      scrollbar-gutter: stable both-edges;
       border: 1px solid var(--border);
       border-radius: 12px;
       background: var(--surface-strong);
     }
 
     .orders-panel {
+      display: flex;
+      flex-direction: column;
+      min-height: min(72vh, calc(100vh - 180px));
       background: #0f172a;
       border-color: #334155;
     }
@@ -1143,6 +1282,7 @@
       border: 0;
       border-radius: 0;
       background: transparent;
+      flex: 1 1 auto;
     }
 
     .orders-table {
@@ -1155,7 +1295,10 @@
     .orders-table td {
       padding: 8px 14px;
       border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-      white-space: nowrap;
+      background: #0f172a;
+      position: sticky;
+      top: 0;
+      z-index: 1;
     }
 
     .orders-table th {
@@ -1177,12 +1320,48 @@
       background: color-mix(in srgb, var(--surface-strong) 60%, transparent);
     }
 
-    body[data-theme='dark'] .orders-table th {
+    body[data-theme='dark'] .orders-table th,
+    body[data-theme='hsbc-dark'] .orders-table th {
       background: transparent;
     }
 
-    body[data-theme='dark'] .orders-table tbody tr:hover {
+    body[data-theme='dark'] .orders-table tbody tr:hover,
+    body[data-theme='hsbc-dark'] .orders-table tbody tr:hover {
       background: rgba(30, 41, 59, 0.56);
+    }
+
+    body[data-theme='hsbc-dark'] .orders-panel {
+      background: #11161d;
+      border-color: #465261;
+    }
+
+    body[data-theme='hsbc-dark'] .orders-panel__header {
+      border-bottom-color: #465261;
+    }
+
+    body[data-theme='hsbc-dark'] .orders-table th,
+    body[data-theme='hsbc-dark'] .orders-table td {
+      background: #11161d;
+    }
+
+    body[data-theme='hsbc-dark'] .orders-table tbody tr:hover {
+      background: rgba(32, 40, 52, 0.72);
+    }
+
+    body[data-theme='hsbc-dark'] .orders-table--simulator thead tr {
+      border-bottom-color: #465261;
+    }
+
+    body[data-theme='hsbc-dark'] .orders-table--simulator tbody tr {
+      border-bottom: 1px solid rgba(70, 82, 97, 0.68);
+    }
+
+    body[data-theme='hsbc-dark'] .orders-table--simulator tbody tr:hover {
+      background: #202834;
+    }
+
+    body[data-theme='hsbc-dark'] .orders-table__empty {
+      color: #9aa6b8;
     }
 
     .orders-table tbody tr:last-child td {
@@ -1232,9 +1411,12 @@
     .text-brand { color: var(--brand); }
     .text-danger { color: var(--danger); }
 
-    body[data-theme='dark'] .text-white { color: #f8fafc; }
-    body[data-theme='dark'] .text-slate-300 { color: #cbd5e1; }
-    body[data-theme='dark'] .text-slate-400 { color: #94a3b8; }
+    body[data-theme='dark'] .text-white,
+    body[data-theme='hsbc-dark'] .text-white { color: #f8fafc; }
+    body[data-theme='dark'] .text-slate-300,
+    body[data-theme='hsbc-dark'] .text-slate-300 { color: #cbd5e1; }
+    body[data-theme='dark'] .text-slate-400,
+    body[data-theme='hsbc-dark'] .text-slate-400 { color: #94a3b8; }
 
     .empty-state {
       padding: 18px;
@@ -1308,10 +1490,16 @@
       padding-top: 0;
     }
 
-    body[data-theme='dark'] .modal-panel {
+    body[data-theme='dark'] .modal-panel,
+    body[data-theme='hsbc-dark'] .modal-panel {
       background: #0f172a;
       border-color: #334155;
       box-shadow: 0 28px 56px rgba(2, 6, 23, 0.48);
+    }
+
+    body[data-theme='hsbc-dark'] .modal-panel {
+      background: #11161d;
+      border-color: #465261;
     }
 
     .market-hint ul {
@@ -1358,7 +1546,7 @@
 </head>
 <body data-theme="dark">
   <div id="app"></div>
-  <script type="module" src="app.js?v=20260322-13"></script>
+  <script type="module" src="app.js?v=20260323-01"></script>
 </body>
 </html>
 

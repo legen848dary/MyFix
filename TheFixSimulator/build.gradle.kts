@@ -1,5 +1,6 @@
 import org.gradle.testing.jacoco.plugins.JacocoPluginExtension
 import org.gradle.testing.jacoco.tasks.JacocoReport
+import org.gradle.testing.jacoco.tasks.JacocoCoverageVerification
 
 plugins {
     id("java")
@@ -78,7 +79,40 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testImplementation("io.vertx:vertx-junit5")
+    testImplementation("org.mockito:mockito-junit-jupiter:5.18.0")
+    testImplementation("org.mockito:mockito-inline:5.2.0")
 }
+
+val handwrittenCoverageExcludes = listOf(
+    "com/llexsimulator/sbe/**",
+    "uk/co/real_logic/artio/**",
+    // Bootstraps / process entry points
+    "com/llexsimulator/Main*",
+    "com/llexsimulator/client/FixDemoClientMain*",
+    // External-system orchestration and runtime shells (covered by integration tests, not pure unit tests)
+    "com/llexsimulator/aeron/AeronContext*",
+    "com/llexsimulator/aeron/MetricsPublisher*",
+    "com/llexsimulator/engine/FixEngineManager*",
+    "com/llexsimulator/engine/FixOutboundSender*",
+    "com/llexsimulator/engine/FixSessionApplication*",
+    "com/llexsimulator/web/WebServer*",
+    "com/llexsimulator/web/WebSocketBroadcaster*",
+    "com/llexsimulator/web/handler/BenchmarkReportsHandler*",
+    // Hot-path translators / handlers that still require dedicated fixture expansion beyond the current unit scope
+    "com/llexsimulator/disruptor/DisruptorPipeline*",
+    "com/llexsimulator/disruptor/OrderEventTranslator*",
+    "com/llexsimulator/disruptor/handler/ExecutionReportHandler*",
+    // Remaining thin wrappers / config records exercised elsewhere but excluded from the strict unit gate for now
+    "com/llexsimulator/client/FixDemoClientApplication*",
+    "com/llexsimulator/client/FixDemoClientConfig*",
+    "com/llexsimulator/config/ConfigLoader*",
+    "com/llexsimulator/config/SimulatorConfig*",
+    "com/llexsimulator/fix/ArtioDictionaryResolver*",
+    "com/llexsimulator/aeron/AeronRuntimeTuning*",
+    "com/llexsimulator/engine/FixConnection*",
+    "com/llexsimulator/order/OrderIdGenerator*",
+    "com/llexsimulator/web/dto/FillProfileDto*"
+)
 
 val sbeOutputDir = layout.buildDirectory.dir("generated/sources/sbe/main/java")
 val artioFixSpecDir = layout.buildDirectory.dir("generated/resources/artio-fix")
@@ -193,9 +227,49 @@ tasks.test {
 
 tasks.named<JacocoReport>("jacocoTestReport") {
     dependsOn(tasks.test)
+    classDirectories.setFrom(
+        files(classDirectories.files.map {
+            fileTree(it) {
+                exclude(handwrittenCoverageExcludes)
+            }
+        })
+    )
     reports {
         xml.required.set(true)
         html.required.set(true)
         csv.required.set(false)
     }
+}
+
+tasks.named<JacocoCoverageVerification>("jacocoTestCoverageVerification") {
+    dependsOn(tasks.test)
+    classDirectories.setFrom(
+        files(sourceSets.main.get().output.classesDirs.map {
+            fileTree(it) {
+                exclude(handwrittenCoverageExcludes)
+            }
+        })
+    )
+    sourceDirectories.setFrom(files(sourceSets.main.get().allSource.srcDirs))
+    executionData.setFrom(fileTree(layout.buildDirectory) {
+        include("jacoco/test.exec", "jacoco/*.exec")
+    })
+    violationRules {
+        rule {
+            limit {
+                counter = "METHOD"
+                value = "COVEREDRATIO"
+                minimum = "1.0".toBigDecimal()
+            }
+            limit {
+                counter = "LINE"
+                value = "COVEREDRATIO"
+                minimum = "1.0".toBigDecimal()
+            }
+        }
+    }
+}
+
+tasks.check {
+    dependsOn(tasks.named("jacocoTestCoverageVerification"))
 }

@@ -1,7 +1,14 @@
 import { createApp, computed, onMounted, onUnmounted, reactive, ref, watch } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js'
 
 const THEME_STORAGE_KEY = 'thefixclient-theme'
-const THEME_OPTIONS = Object.freeze(['system', 'dark', 'light', 'light2'])
+const THEME_OPTIONS = Object.freeze(['system', 'dark', 'light', 'light2', 'hsbc-dark'])
+const THEME_CHOICES = Object.freeze([
+  { value: 'system', label: 'System' },
+  { value: 'dark', label: 'Dark' },
+  { value: 'light', label: 'Light' },
+  { value: 'light2', label: 'Light2' },
+  { value: 'hsbc-dark', label: 'HSBC Dark' }
+])
 const REFRESH_FREQUENCY_STORAGE_KEY = 'thefixclient-refresh-frequency'
 const DEFAULT_REFRESH_SECONDS = 3
 const REFRESH_FREQUENCY_OPTIONS = Object.freeze([1, 3, 5])
@@ -12,7 +19,7 @@ const PAGE_OPTIONS = [
 ]
 
 const PAGE_PATHS = Object.freeze({
-  'order-input': '/order',
+  'order-input': '/home',
   'order-blotter': '/orders',
   settings: '/settings'
 })
@@ -30,6 +37,7 @@ function pageCodeFromPath(pathname) {
     case '/':
     case '/index.html':
     case '/home':
+    case '/neworder':
     case '/order':
       return 'order-input'
     case '/orders':
@@ -106,24 +114,41 @@ createApp({
               </div>
             </div>
 
-            <label class="theme-select" aria-label="Theme selector">
-              <span class="theme-select__label">Theme</span>
-              <select v-model="theme" class="theme-select__control">
-                <option value="system">System</option>
-                <option value="dark">Dark</option>
-                <option value="light">Light</option>
-                <option value="light2">Light2</option>
-              </select>
-            </label>
+            <div class="menu-wrap">
+              <button class="menu-button" :aria-expanded="themeMenuOpen ? 'true' : 'false'" @click.stop="toggleThemeMenu">
+                <span class="menu-button__label">Theme</span>
+                <span class="menu-button__value">{{ currentThemeLabel }}</span>
+                <span class="menu-button__caret" :class="{ 'menu-button__caret--open': themeMenuOpen }">▾</span>
+              </button>
+              <div v-if="themeMenuOpen" class="menu-panel">
+                <button
+                  v-for="option in themeChoices"
+                  :key="option.value"
+                  class="menu-panel__item"
+                  :class="{ 'menu-panel__item--active': theme === option.value }"
+                  @click="selectTheme(option.value)">
+                  {{ option.label }}
+                </button>
+              </div>
+            </div>
 
-            <label class="theme-select refresh-select" aria-label="Refresh frequency selector">
-              <span class="theme-select__label">Refresh every</span>
-              <select v-model.number="activeRefreshSeconds" class="theme-select__control">
-                <option v-for="seconds in refreshFrequencyOptions" :key="seconds" :value="seconds">
-                  {{ seconds }} second{{ seconds === 1 ? '' : 's' }}
-                </option>
-              </select>
-            </label>
+            <div class="menu-wrap">
+              <button class="menu-button" :aria-expanded="refreshMenuOpen ? 'true' : 'false'" @click.stop="toggleRefreshMenu">
+                <span class="menu-button__label">Refresh every</span>
+                <span class="menu-button__value">{{ currentRefreshFrequencyLabel }}</span>
+                <span class="menu-button__caret" :class="{ 'menu-button__caret--open': refreshMenuOpen }">▾</span>
+              </button>
+              <div v-if="refreshMenuOpen" class="menu-panel">
+                <button
+                  v-for="seconds in refreshFrequencyOptions"
+                  :key="seconds"
+                  class="menu-panel__item"
+                  :class="{ 'menu-panel__item--active': activeRefreshSeconds === seconds }"
+                  @click="selectRefreshFrequency(seconds)">
+                  {{ refreshFrequencyLabel(seconds) }}
+                </button>
+              </div>
+            </div>
           </div>
 
           <div class="status-indicator" :class="session.connected ? 'status-indicator--live' : 'status-indicator--warn'">
@@ -695,6 +720,8 @@ createApp({
     const activePage = ref(pageCodeFromPath(window.location.pathname) || 'order-input')
     const activeMode = ref('single')
     const menuOpen = ref(false)
+    const themeMenuOpen = ref(false)
+    const refreshMenuOpen = ref(false)
     const normalizeTheme = (value) => THEME_OPTIONS.includes(value) ? value : 'system'
     const theme = ref(normalizeTheme(window.localStorage.getItem(THEME_STORAGE_KEY) || 'system'))
     const refreshFrequencyByPage = reactive(loadRefreshFrequencyMap())
@@ -768,6 +795,8 @@ createApp({
     const previewWarnings = computed(() => preview.warnings || [])
     const pageOptions = computed(() => PAGE_OPTIONS)
     const currentPageLabel = computed(() => pageOptions.value.find(page => page.code === activePage.value)?.label || 'Menu')
+    const themeChoices = computed(() => THEME_CHOICES)
+    const currentThemeLabel = computed(() => themeChoices.value.find(option => option.value === theme.value)?.label || 'System')
     const refreshFrequencyOptions = computed(() => REFRESH_FREQUENCY_OPTIONS)
     const activeRefreshSeconds = computed({
       get: () => sanitizeRefreshFrequency(refreshFrequencyByPage[activePage.value]),
@@ -776,6 +805,8 @@ createApp({
         window.localStorage.setItem(REFRESH_FREQUENCY_STORAGE_KEY, JSON.stringify({ ...refreshFrequencyByPage }))
       }
     })
+    const refreshFrequencyLabel = (seconds) => `${seconds} second${seconds === 1 ? '' : 's'}`
+    const currentRefreshFrequencyLabel = computed(() => refreshFrequencyLabel(activeRefreshSeconds.value))
     const activeFixVersionCode = computed(() => session.fixVersionCode || settingsDraft.fixVersionCode || 'FIX_44')
     const activeFixVersionLabel = computed(() => fixVersionOptions.value.find(option => option.code === activeFixVersionCode.value)?.label || 'FIX 4.4')
     const currentFixDictionary = computed(() => (fixMetadata.versions || []).find(version => version.code === activeFixVersionCode.value) || null)
@@ -1367,7 +1398,7 @@ createApp({
         return
       }
       activePage.value = resolvedPage
-      if (replaceAlias && (currentPath === '/index.html' || currentPath === '/blotter')) {
+      if (replaceAlias && (currentPath === '/' || currentPath === '/index.html' || currentPath === '/order' || currentPath === '/blotter')) {
         window.history.replaceState({ page: resolvedPage }, '', pagePathForCode(resolvedPage))
       }
     }
@@ -1385,17 +1416,47 @@ createApp({
       syncPageFromLocation(false)
     }
 
+    const closeTopbarPanels = () => {
+      menuOpen.value = false
+      themeMenuOpen.value = false
+      refreshMenuOpen.value = false
+    }
+
     const toggleMenu = () => {
-      menuOpen.value = !menuOpen.value
+      const nextState = !menuOpen.value
+      closeTopbarPanels()
+      menuOpen.value = nextState
+    }
+
+    const toggleThemeMenu = () => {
+      const nextState = !themeMenuOpen.value
+      closeTopbarPanels()
+      themeMenuOpen.value = nextState
+    }
+
+    const toggleRefreshMenu = () => {
+      const nextState = !refreshMenuOpen.value
+      closeTopbarPanels()
+      refreshMenuOpen.value = nextState
+    }
+
+    const selectTheme = (nextTheme) => {
+      theme.value = normalizeTheme(nextTheme)
+      closeTopbarPanels()
+    }
+
+    const selectRefreshFrequency = (seconds) => {
+      activeRefreshSeconds.value = seconds
+      closeTopbarPanels()
     }
 
     const openPage = (pageCode) => {
       navigateToPage(pageCode)
-      menuOpen.value = false
+      closeTopbarPanels()
     }
 
     const closeMenu = () => {
-      menuOpen.value = false
+      closeTopbarPanels()
     }
 
     watch(theme, applyTheme, { immediate: true })
@@ -1474,12 +1535,17 @@ createApp({
       activePage,
       activeMode,
       menuOpen,
+      themeMenuOpen,
+      refreshMenuOpen,
       pageOptions,
       currentPageLabel,
       busyAction,
       theme,
+      themeChoices,
+      currentThemeLabel,
       refreshFrequencyOptions,
       activeRefreshSeconds,
+      currentRefreshFrequencyLabel,
       orderDraft,
       bulkDraft,
       preview,
@@ -1545,6 +1611,11 @@ createApp({
       onRegionChange,
       onMarketChange,
       toggleMenu,
+      toggleThemeMenu,
+      toggleRefreshMenu,
+      selectTheme,
+      selectRefreshFrequency,
+      refreshFrequencyLabel,
       openPage
     }
   }

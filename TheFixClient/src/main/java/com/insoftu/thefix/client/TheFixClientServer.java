@@ -60,8 +60,8 @@ final class TheFixClientServer {
         router.post("/api/order-flow/start").handler(ctx -> writeJson(ctx.response(), workbenchState.startOrderFlow(bodyJson(ctx))));
         router.post("/api/order-flow/stop").handler(ctx -> writeJson(ctx.response(), workbenchState.stopOrderFlow()));
 
-        router.getWithRegex("^/(home|order|orders|blotter|settings)$").handler(ctx -> ctx.reroute("/index.html"));
-        router.getWithRegex("^/(home|order|orders|blotter|settings)/$").handler(ctx -> ctx.response()
+        router.getWithRegex("^/(home|neworder|order|orders|blotter|settings)$").handler(ctx -> ctx.reroute("/index.html"));
+        router.getWithRegex("^/(home|neworder|order|orders|blotter|settings)/$").handler(ctx -> ctx.response()
                 .setStatusCode(308)
                 .putHeader("location", ctx.request().path().substring(0, ctx.request().path().length() - 1))
                 .end());

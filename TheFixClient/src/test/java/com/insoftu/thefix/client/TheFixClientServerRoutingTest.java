@@ -47,14 +47,23 @@ class TheFixClientServerRoutingTest {
         server.start();
 
         HttpClient client = HttpClient.newHttpClient();
-        for (String path : List.of("/", "/home", "/order", "/orders", "/blotter", "/settings")) {
+        for (String path : List.of("/", "/home", "/neworder", "/order", "/orders", "/blotter", "/settings")) {
             HttpResponse<String> response = send(client, path);
             assertEquals(200, response.statusCode(), "Unexpected status for " + path);
             assertTrue(response.headers().firstValue("content-type").orElse("").contains("text/html"), "Expected HTML for " + path);
             assertTrue(response.body().contains("<div id=\"app\"></div>"), "Expected SPA shell for " + path);
             assertTrue(response.body().contains("<base href=\"/\"/>"), "Expected base href for " + path);
             assertTrue(response.body().contains("app.js?v="), "Expected app.js reference for " + path);
+            assertTrue(response.body().contains("overflow-y: auto;"), "Expected orders blotter vertical scroll styling in shell for " + path);
         }
+
+        HttpResponse<String> appJsFromAsset = send(client, "/app.js");
+        assertEquals(200, appJsFromAsset.statusCode());
+        assertTrue(appJsFromAsset.body().contains("'order-input': '/home'"));
+        assertTrue(appJsFromAsset.body().contains("case '/neworder':"));
+        assertTrue(appJsFromAsset.body().contains("'hsbc-dark'"));
+        assertTrue(appJsFromAsset.body().contains("toggleThemeMenu"));
+        assertTrue(appJsFromAsset.body().contains("toggleRefreshMenu"));
 
         HttpResponse<String> apiHealth = send(client, "/api/health");
         assertEquals(200, apiHealth.statusCode());
@@ -83,9 +92,7 @@ class TheFixClientServerRoutingTest {
         assertEquals(200, cancelOrder.statusCode());
         assertTrue(cancelOrder.body().contains("\"actionResult\""));
 
-        HttpResponse<String> appJs = send(client, "/app.js");
-        assertEquals(200, appJs.statusCode());
-        assertTrue(appJs.body().contains("createApp({"));
+        assertTrue(appJsFromAsset.body().contains("createApp({"));
 
         HttpResponse<String> trailingSlashRedirect = send(client, "/blotter/");
         assertEquals(308, trailingSlashRedirect.statusCode());
@@ -94,6 +101,10 @@ class TheFixClientServerRoutingTest {
         HttpResponse<String> ordersTrailingSlashRedirect = send(client, "/orders/");
         assertEquals(308, ordersTrailingSlashRedirect.statusCode());
         assertEquals("/orders", ordersTrailingSlashRedirect.headers().firstValue("location").orElse(""));
+
+        HttpResponse<String> newOrderTrailingSlashRedirect = send(client, "/neworder/");
+        assertEquals(308, newOrderTrailingSlashRedirect.statusCode());
+        assertEquals("/neworder", newOrderTrailingSlashRedirect.headers().firstValue("location").orElse(""));
 
         HttpResponse<String> missingAsset = send(client, "/missing-does-not-exist.js");
         assertEquals(404, missingAsset.statusCode());

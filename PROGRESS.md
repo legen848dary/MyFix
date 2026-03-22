@@ -1,6 +1,6 @@
 # MyFix Progress Tracker
 
-Last updated: 2026-03-21
+Last updated: 2026-03-23
 
 ## Purpose
 
@@ -9,8 +9,13 @@ A new session should read this file first, then continue from the **Immediate ne
 
 ## Current overall status
 
-- Session handoff note (2026-03-21): this chat session did not make implementation changes or rerun validation commands; this file update is for handoff only.
-- The `Latest verified green state` section below still reflects the most recent known-good verification point and should remain the baseline for the next chat.
+- Session checkpoint (2026-03-23): the pending simulator coverage work remains in the working tree and the client polish requested by the user has now been implemented and verified.
+- Landed client polish in `TheFixClient`:
+  - `/home` remains canonical for the order-entry page while `/neworder` is also supported end-to-end as a clean route alias.
+  - `My Orders` has a stable vertical scrollbar/scrollable panel layout.
+  - Topbar `Theme` and `Refresh every` controls now behave like `Menu`: clicking anywhere in the control opens the dropdown.
+  - Added a new `HSBC Dark` theme with dark HSBC-red primary/success/tab-active styling.
+- The `Latest verified green state` section below has been refreshed to reflect the most recent validation run.
 - Repository is a Gradle multi-module project:
   - `TheFixClient`
   - `TheFixSimulator`
@@ -22,10 +27,11 @@ A new session should read this file first, then continue from the **Immediate ne
 
 ## Latest verified green state
 
-Verified on: 2026-03-21
+Verified on: 2026-03-23
 
-- Root build + packaging green via `./gradlew --no-daemon clean build :TheFixSimulator:shadowJar -x :TheFixSimulator:test`
-- `TheFixClient` test suite green via `./gradlew --no-daemon :TheFixClient:test`
+- Root build green via `./gradlew --no-daemon build`
+- `TheFixClient` test suite green via `./gradlew --no-daemon :TheFixClient:test --rerun-tasks`
+- Focused client route/web-asset validation green via `./gradlew --no-daemon :TheFixClient:test --tests com.insoftu.thefix.client.TheFixClientServerRoutingTest`
 - Direct client run green via `./gradlew --no-daemon :TheFixClient:run` plus:
   - `GET /api/health`
   - `GET /api/overview`

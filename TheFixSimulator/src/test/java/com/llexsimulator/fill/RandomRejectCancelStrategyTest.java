@@ -45,4 +45,21 @@ class RandomRejectCancelStrategyTest {
         assertTrue(sawReject, "Expected at least one random reject outcome");
         assertTrue(sawCancel, "Expected at least one random cancel outcome");
     }
+
+    @Test
+    void usesCollapsedDelayWindowWhenMinIsGreaterThanOrEqualToMax() {
+        RandomRejectCancelStrategy strategy = new RandomRejectCancelStrategy();
+        FillBehaviorConfig config = new FillBehaviorConfig();
+        config.randomMinDelayNs = 9L;
+        config.randomMaxDelayNs = 9L;
+
+        OrderEvent event = new OrderEvent();
+        event.correlationId = 999L;
+        event.fillInstructionEncoder.wrapAndApplyHeader(event.fillInstructionBuffer, 0, event.headerEncoder);
+
+        strategy.apply(event, config);
+
+        event.fillInstructionDecoder.wrapAndApplyHeader(event.fillInstructionBuffer, 0, event.headerDecoder);
+        assertEquals(9L, event.fillInstructionDecoder.delayNs());
+    }
 }
