@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <base href="/"/>
   <title>TheFixClient — Trader Workstation</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -87,7 +88,7 @@
     .shell {
       max-width: 1480px;
       margin: 0 auto;
-      padding: 28px;
+      padding: 24px;
     }
 
     .topbar {
@@ -95,7 +96,7 @@
       justify-content: space-between;
       gap: 24px;
       align-items: flex-start;
-      padding: 26px 28px;
+      padding: 18px 22px;
       border: 1px solid var(--border);
       border-radius: 30px;
       background: linear-gradient(135deg, var(--surface-strong), var(--surface));
@@ -103,11 +104,11 @@
       box-shadow: var(--shadow);
     }
 
-    .brand { display: flex; gap: 18px; align-items: flex-start; }
+    .brand { display: flex; gap: 14px; align-items: center; }
     .brand__mark {
-      width: 56px;
-      height: 56px;
-      border-radius: 18px;
+      width: 48px;
+      height: 48px;
+      border-radius: 16px;
       display: grid;
       place-items: center;
       background: linear-gradient(135deg, var(--brand), var(--brand-strong));
@@ -117,7 +118,7 @@
       box-shadow: 0 16px 30px color-mix(in srgb, var(--brand) 32%, transparent);
     }
     .brand__eyebrow {
-      margin: 0 0 6px;
+      margin: 0 0 4px;
       font-size: 11px;
       text-transform: uppercase;
       letter-spacing: 0.24em;
@@ -126,7 +127,7 @@
     }
     .brand__title {
       margin: 0;
-      font-size: 30px;
+      font-size: 26px;
       line-height: 1.1;
     }
     .brand__subtitle {
@@ -726,6 +727,30 @@
       color: var(--text-soft);
     }
 
+    .chip--neutral {
+      color: var(--text-soft);
+      background: var(--surface-muted);
+      border-color: var(--border);
+    }
+
+    .chip--success {
+      color: var(--success);
+      background: var(--success-soft);
+      border-color: color-mix(in srgb, var(--success) 22%, transparent);
+    }
+
+    .chip--warn {
+      color: var(--warn);
+      background: var(--warn-soft);
+      border-color: color-mix(in srgb, var(--warn) 22%, transparent);
+    }
+
+    .chip--danger {
+      color: var(--brand);
+      background: var(--brand-soft);
+      border-color: color-mix(in srgb, var(--brand) 22%, transparent);
+    }
+
     .compact-card--metric-tile .eyebrow {
       font-size: 10px;
       letter-spacing: 0.14em;
@@ -782,6 +807,24 @@
       font-weight: 600;
     }
 
+    .flash-fill {
+      animation: flashGreen 0.6s ease-out;
+    }
+
+    .flash-reject {
+      animation: flashRed 0.6s ease-out;
+    }
+
+    @keyframes flashGreen {
+      0% { background: color-mix(in srgb, var(--success) 18%, transparent); }
+      100% { background: transparent; }
+    }
+
+    @keyframes flashRed {
+      0% { background: color-mix(in srgb, var(--brand) 18%, transparent); }
+      100% { background: transparent; }
+    }
+
     .events,
     .orders {
       display: grid;
@@ -816,6 +859,84 @@
 
     .mono { font-family: 'JetBrains Mono', monospace; }
     .muted { color: var(--text-soft); }
+    .text-left { text-align: left; }
+    .text-right { text-align: right; }
+    .text-white { color: var(--text); }
+    .text-slate-300 { color: var(--text-soft); }
+    .text-slate-400 { color: var(--text-faint); }
+
+    .orders-table__scroll {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--surface-muted);
+    }
+
+    .orders-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .orders-table th,
+    .orders-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+      white-space: nowrap;
+    }
+
+    .orders-table th {
+      text-align: left;
+      font-weight: 600;
+      color: var(--text-faint);
+      background: color-mix(in srgb, var(--surface-strong) 78%, transparent);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 10px;
+    }
+
+    .orders-table tbody tr {
+      font-family: 'JetBrains Mono', monospace;
+      transition: background 140ms ease;
+    }
+
+    .orders-table tbody tr:hover {
+      background: color-mix(in srgb, var(--surface-strong) 60%, transparent);
+    }
+
+    .orders-table tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    .order-row {
+      position: relative;
+    }
+
+    .order-side {
+      display: inline-flex;
+      align-items: center;
+      padding: 5px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      border: 1px solid transparent;
+    }
+
+    .order-side--buy {
+      color: var(--success);
+      background: var(--success-soft);
+      border-color: color-mix(in srgb, var(--success) 22%, transparent);
+    }
+
+    .order-side--sell {
+      color: var(--brand);
+      background: var(--brand-soft);
+      border-color: color-mix(in srgb, var(--brand) 22%, transparent);
+    }
+
+    .strong { font-weight: 700; }
+
     .empty-state {
       padding: 18px;
       border-radius: var(--radius-lg);
@@ -843,7 +964,7 @@
 
     @media (max-width: 900px) {
       .shell { padding: 16px; }
-      .topbar { flex-direction: column; padding: 20px; }
+      .topbar { flex-direction: column; padding: 16px 18px; }
       .topbar__controls {
         width: 100%;
         display: grid;
@@ -868,7 +989,7 @@
 </head>
 <body data-theme="dark">
   <div id="app"></div>
-  <script type="module" src="app.js?v=20260321-10"></script>
+  <script type="module" src="app.js?v=20260322-02"></script>
 </body>
 </html>
 

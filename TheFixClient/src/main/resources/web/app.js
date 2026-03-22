@@ -7,6 +7,40 @@ const PAGE_OPTIONS = [
   { code: 'settings', label: 'Settings' }
 ]
 
+const PAGE_PATHS = Object.freeze({
+  'order-input': '/order',
+  'order-blotter': '/blotter',
+  settings: '/settings'
+})
+
+function normalizePagePath(pathname) {
+  if (!pathname || pathname === '/') {
+    return '/'
+  }
+  const normalized = pathname.replace(/\/+$/, '')
+  return normalized || '/'
+}
+
+function pageCodeFromPath(pathname) {
+  switch (normalizePagePath(pathname)) {
+    case '/':
+    case '/index.html':
+    case '/home':
+    case '/order':
+      return 'order-input'
+    case '/blotter':
+      return 'order-blotter'
+    case '/settings':
+      return 'settings'
+    default:
+      return ''
+  }
+}
+
+function pagePathForCode(pageCode) {
+  return PAGE_PATHS[pageCode] || PAGE_PATHS['order-input']
+}
+
 createApp({
   template: `
     <div class="shell">
@@ -16,8 +50,6 @@ createApp({
           <div>
             <p class="brand__eyebrow">Order workstation</p>
             <h1 class="brand__title">{{ overview.applicationName || 'TheFixClient' }}</h1>
-            <p class="brand__subtitle">{{ overview.subtitle || 'Electronic execution workstation' }}</p>
-            <p class="brand__subtitle">{{ overview.environment }}</p>
           </div>
         </div>
 
@@ -89,7 +121,7 @@ createApp({
                   <p class="compact-card__copy">Reports</p>
                 </div>
                 <div class="compact-card compact-card--metric-tile">
-                  <p class="eyebrow">Reject / fail</p>
+                  <p class="eyebrow">Reject/Cancel</p>
                   <p class="compact-card__value">{{ kpis.rejects }} / {{ kpis.sendFailures }}</p>
                   <p class="compact-card__copy">Count</p>
                 </div>
@@ -267,13 +299,6 @@ createApp({
                 <p class="compact-card__copy">Bulk mode is available for New Order Single only. Switch the message type back to NOS to run bulk traffic.</p>
               </div>
 
-              <div class="compact-card" style="margin-top: 18px;">
-                <p class="eyebrow">Preview summary</p>
-                <p class="compact-card__value mono">{{ preview.summary || 'Draft ready' }}</p>
-                <p class="compact-card__copy">{{ preview.routeSummary || 'Route and tag metadata will appear here.' }}</p>
-                <p class="compact-card__copy">Notional {{ preview.notional || '—' }} · {{ preview.recommendation || 'Run a preview to validate the current draft.' }}</p>
-              </div>
-
               <ul v-if="previewWarnings.length" class="warning-list" style="margin-top: 18px;">
                 <li v-for="warning in previewWarnings" :key="warning">{{ warning }}</li>
               </ul>
@@ -321,26 +346,50 @@ createApp({
             <div class="panel__header">
               <div>
                 <h2 class="panel__title">Order Blotter</h2>
-                <p class="panel__copy">Manual and bulk-routed orders with status, execution state, and operator notes.</p>
               </div>
               <span class="chip">{{ recentOrders.length }} tracked</span>
             </div>
             <div class="panel__body">
               <div v-if="!recentOrders.length" class="empty-state">No routed orders yet. Send a FIX message or start bulk NOS flow from Create FIX message.</div>
-              <div v-else class="orders">
-                <div v-for="order in recentOrders" :key="order.clOrdId" class="order-row">
-                  <p class="order-row__title">{{ order.side }} {{ order.quantity }} {{ order.symbol }}</p>
-                  <p class="order-row__copy">{{ order.note }}</p>
-                  <div class="order-meta">
-                    <span class="chip">{{ order.source }}</span>
-                    <span class="chip">Status {{ order.status }}</span>
-                    <span class="chip">Exec {{ order.execType }}</span>
-                    <span class="chip mono">Px {{ order.limitPrice }}</span>
-                    <span class="chip mono">AvgPx {{ order.avgPx }}</span>
-                    <span class="chip mono">{{ order.clOrdId }}</span>
-                    <span class="chip mono">{{ order.time }}</span>
-                  </div>
-                </div>
+              <div v-else class="orders-table__scroll">
+                <table class="orders-table">
+                  <thead>
+                    <tr>
+                      <th class="text-left">Time</th>
+                      <th class="text-left">Symbol</th>
+                      <th class="text-left">Side</th>
+                      <th class="text-right">Qty</th>
+                      <th class="text-right">Price</th>
+                      <th class="text-left">ExecType</th>
+                      <th class="text-left">Status</th>
+                      <th class="text-left">Type</th>
+                      <th class="text-left">ClOrdID</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="order in recentOrders"
+                        :key="order.clOrdId"
+                        :class="orderRowClass(order)">
+                      <td class="mono text-slate-400">{{ order.time }}</td>
+                      <td class="mono text-white strong">{{ order.symbol }}</td>
+                      <td>
+                        <span class="order-side" :class="order.side === 'SELL' ? 'order-side--sell' : 'order-side--buy'">{{ order.side }}</span>
+                      </td>
+                      <td class="mono text-right text-white">{{ order.quantity }}</td>
+                      <td class="mono text-right text-slate-300">{{ order.limitPrice }}</td>
+                      <td>
+                        <span class="chip" :class="execTypeBadge(order.execType)">{{ order.execType }}</span>
+                      </td>
+                      <td>
+                        <span class="chip">{{ order.status }}</span>
+                      </td>
+                      <td>
+                        <span class="chip">{{ order.source }}</span>
+                      </td>
+                      <td class="mono text-slate-300">{{ order.clOrdId }}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
           </article>
@@ -463,9 +512,7 @@ createApp({
 
   setup() {
     const overview = reactive({
-      applicationName: 'TheFixClient',
-      subtitle: 'Electronic execution workstation',
-      environment: 'Loading…'
+      applicationName: 'TheFixClient'
     })
 
     const session = reactive({
@@ -532,7 +579,7 @@ createApp({
     const sessionActionPending = ref('')
     const refreshHandle = ref(null)
     const previewTimer = ref(null)
-    const activePage = ref('order-input')
+    const activePage = ref(pageCodeFromPath(window.location.pathname) || 'order-input')
     const activeMode = ref('single')
     const menuOpen = ref(false)
     const theme = ref(window.localStorage.getItem(THEME_STORAGE_KEY) || 'system')
@@ -608,6 +655,30 @@ createApp({
       if (sessionActionPending.value === 'disconnect') return 'Disconnecting…'
       return session.connected ? 'Disconnect' : 'Connect'
     })
+    const execTypeBadge = (execType) => {
+      const normalized = String(execType || '').trim().toUpperCase()
+      if (normalized === 'FILL' || normalized === 'TRADE') {
+        return 'chip--success'
+      }
+      if (normalized === 'PARTIAL_FILL' || normalized === 'PARTIAL') {
+        return 'chip--warn'
+      }
+      if (normalized === 'REJECT' || normalized === 'REJECTED' || normalized === 'CANCELED' || normalized === 'CANCELLED' || normalized === 'CANCEL' || normalized === 'EXPIRED') {
+        return 'chip--danger'
+      }
+      return 'chip--neutral'
+    }
+    const orderRowClass = (order) => {
+      const status = String(order?.status || '').toLowerCase()
+      const execType = String(order?.execType || '').toLowerCase()
+      if (status.includes('reject') || execType.includes('reject')) {
+        return ['order-row', 'flash-reject']
+      }
+      if (status.includes('fill') || execType.includes('fill') || status === 'sent' || status === 'new') {
+        return ['order-row', 'flash-fill']
+      }
+      return ['order-row']
+    }
 
     const themeMediaQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null
 
@@ -719,9 +790,7 @@ createApp({
 
     const applyOverview = (payload, preserveSettingsDraft = true, preservePendingSessionState = false) => {
       Object.assign(overview, {
-        applicationName: payload.applicationName,
-        subtitle: payload.subtitle,
-        environment: payload.environment
+        applicationName: payload.applicationName
       })
       if (preservePendingSessionState && sessionActionPending.value) {
         Object.assign(session, {
@@ -970,12 +1039,39 @@ createApp({
       schedulePreview()
     }
 
+    const syncPageFromLocation = (replaceAlias = false) => {
+      const currentPath = normalizePagePath(window.location.pathname)
+      const resolvedPage = pageCodeFromPath(currentPath)
+      if (!resolvedPage) {
+        activePage.value = 'order-input'
+        window.history.replaceState({ page: 'order-input' }, '', pagePathForCode('order-input'))
+        return
+      }
+      activePage.value = resolvedPage
+      if (replaceAlias && currentPath === '/index.html') {
+        window.history.replaceState({ page: resolvedPage }, '', pagePathForCode(resolvedPage))
+      }
+    }
+
+    const navigateToPage = (pageCode, replace = false) => {
+      const nextPath = pagePathForCode(pageCode)
+      activePage.value = pageCode
+      if (normalizePagePath(window.location.pathname) !== nextPath) {
+        const method = replace ? 'replaceState' : 'pushState'
+        window.history[method]({ page: pageCode }, '', nextPath)
+      }
+    }
+
+    const handlePopState = () => {
+      syncPageFromLocation(false)
+    }
+
     const toggleMenu = () => {
       menuOpen.value = !menuOpen.value
     }
 
     const openPage = (pageCode) => {
-      activePage.value = pageCode
+      navigateToPage(pageCode)
       menuOpen.value = false
     }
 
@@ -1011,7 +1107,9 @@ createApp({
       } else if (themeMediaQuery?.addListener) {
         themeMediaQuery.addListener(handleSystemThemeChange)
       }
+      window.addEventListener('popstate', handlePopState)
       window.addEventListener('click', closeMenu)
+      syncPageFromLocation(true)
       await loadFixMetadata()
       await loadOverview()
       await previewTicket()
@@ -1025,6 +1123,7 @@ createApp({
       if (refreshHandle.value) {
         window.clearInterval(refreshHandle.value)
       }
+      window.removeEventListener('popstate', handlePopState)
       window.removeEventListener('click', closeMenu)
       if (themeMediaQuery?.removeEventListener) {
         themeMediaQuery.removeEventListener('change', handleSystemThemeChange)
@@ -1068,6 +1167,8 @@ createApp({
       selectedSuggestedTagKey,
       sessionActionBusy,
       sessionButtonLabel,
+      execTypeBadge,
+      orderRowClass,
       settingsState,
       settingsDraft,
       selectedProfileName,

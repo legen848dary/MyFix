@@ -56,6 +56,12 @@ final class TheFixClientServer {
         router.post("/api/order-flow/start").handler(ctx -> writeJson(ctx.response(), workbenchState.startOrderFlow(bodyJson(ctx))));
         router.post("/api/order-flow/stop").handler(ctx -> writeJson(ctx.response(), workbenchState.stopOrderFlow()));
 
+        router.getWithRegex("^/(home|order|blotter|settings)$").handler(ctx -> ctx.reroute("/index.html"));
+        router.getWithRegex("^/(home|order|blotter|settings)/$").handler(ctx -> ctx.response()
+                .setStatusCode(308)
+                .putHeader("location", ctx.request().path().substring(0, ctx.request().path().length() - 1))
+                .end());
+
         router.route().handler(StaticHandler.create("web")
                 .setCachingEnabled(false)
                 .setIndexPage("index.html"));
@@ -100,6 +106,10 @@ final class TheFixClientServer {
         } catch (Exception exception) {
             log.warn("Error while stopping TheFixClient Vert.x runtime", exception);
         }
+    }
+
+    int actualPort() {
+        return httpServer == null ? config.port() : httpServer.actualPort();
     }
 
     private static void writeJson(io.vertx.core.http.HttpServerResponse response, JsonObject payload) {
