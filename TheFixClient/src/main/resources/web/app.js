@@ -1,15 +1,18 @@
 import { createApp, computed, onMounted, onUnmounted, reactive, ref, watch } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js'
 
 const THEME_STORAGE_KEY = 'thefixclient-theme'
+const REFRESH_FREQUENCY_STORAGE_KEY = 'thefixclient-refresh-frequency'
+const DEFAULT_REFRESH_SECONDS = 3
+const REFRESH_FREQUENCY_OPTIONS = Object.freeze([1, 3, 5])
 const PAGE_OPTIONS = [
   { code: 'order-input', label: 'Create FIX message' },
-  { code: 'order-blotter', label: 'Order Blotter' },
+  { code: 'order-blotter', label: 'My Orders' },
   { code: 'settings', label: 'Settings' }
 ]
 
 const PAGE_PATHS = Object.freeze({
   'order-input': '/order',
-  'order-blotter': '/blotter',
+  'order-blotter': '/orders',
   settings: '/settings'
 })
 
@@ -28,6 +31,7 @@ function pageCodeFromPath(pathname) {
     case '/home':
     case '/order':
       return 'order-input'
+    case '/orders':
     case '/blotter':
       return 'order-blotter'
     case '/settings':
@@ -39,6 +43,34 @@ function pageCodeFromPath(pathname) {
 
 function pagePathForCode(pageCode) {
   return PAGE_PATHS[pageCode] || PAGE_PATHS['order-input']
+}
+
+function defaultRefreshFrequencyMap() {
+  return PAGE_OPTIONS.reduce((map, page) => {
+    map[page.code] = DEFAULT_REFRESH_SECONDS
+    return map
+  }, {})
+}
+
+function sanitizeRefreshFrequency(seconds) {
+  return REFRESH_FREQUENCY_OPTIONS.includes(Number(seconds)) ? Number(seconds) : DEFAULT_REFRESH_SECONDS
+}
+
+function loadRefreshFrequencyMap() {
+  const defaults = defaultRefreshFrequencyMap()
+  try {
+    const raw = window.localStorage.getItem(REFRESH_FREQUENCY_STORAGE_KEY)
+    if (!raw) {
+      return defaults
+    }
+    const parsed = JSON.parse(raw)
+    return PAGE_OPTIONS.reduce((map, page) => {
+      map[page.code] = sanitizeRefreshFrequency(parsed?.[page.code])
+      return map
+    }, { ...defaults })
+  } catch (error) {
+    return defaults
+  }
 }
 
 createApp({
@@ -81,15 +113,24 @@ createApp({
                 <option value="light">Light</option>
               </select>
             </label>
+
+            <label class="theme-select refresh-select" aria-label="Refresh frequency selector">
+              <span class="theme-select__label">Refresh every</span>
+              <select v-model.number="activeRefreshSeconds" class="theme-select__control">
+                <option v-for="seconds in refreshFrequencyOptions" :key="seconds" :value="seconds">
+                  {{ seconds }} second{{ seconds === 1 ? '' : 's' }}
+                </option>
+              </select>
+            </label>
           </div>
 
-          <div class="badge" :class="session.connected ? 'badge--live' : 'badge--warn'">
-            <span class="badge__dot"></span>
-            <span>{{ session.connected ? 'FIX session live' : 'Awaiting logon' }}</span>
+          <div class="status-indicator" :class="session.connected ? 'status-indicator--live' : 'status-indicator--warn'">
+            <span class="status-indicator__dot"></span>
+            <span>{{ session.connected ? 'FIX LIVE' : 'FIX IDLE' }}</span>
           </div>
-          <div class="badge" :class="session.autoFlowActive ? 'badge--flow' : ''">
-            <span class="badge__dot"></span>
-            <span>{{ session.autoFlowActive ? session.autoFlowDescriptor : 'Bulk flow idle' }}</span>
+          <div class="status-indicator" :class="session.autoFlowActive ? 'status-indicator--flow' : 'status-indicator--idle'">
+            <span class="status-indicator__dot"></span>
+            <span>{{ session.autoFlowActive ? session.autoFlowDescriptor : 'AUTO FLOW IDLE' }}</span>
           </div>
         </div>
       </header>
@@ -342,17 +383,15 @@ createApp({
 
       <main v-else-if="activePage === 'order-blotter'" class="workspace workspace--single">
         <section class="stack">
-          <article class="panel">
-            <div class="panel__header">
+          <article class="panel orders-panel">
+            <div class="panel__header orders-panel__header">
               <div>
-                <h2 class="panel__title">Order Blotter</h2>
+                <h2 class="panel__title">My Orders</h2>
               </div>
-              <span class="chip">{{ recentOrders.length }} tracked</span>
+              <span class="orders-panel__count mono">{{ recentOrders.length }} recent</span>
             </div>
-            <div class="panel__body">
-              <div v-if="!recentOrders.length" class="empty-state">No routed orders yet. Send a FIX message or start bulk NOS flow from Create FIX message.</div>
-              <div v-else class="orders-table__scroll">
-                <table class="orders-table">
+            <div class="orders-table__scroll">
+              <table class="orders-table orders-table--simulator">
                   <thead>
                     <tr>
                       <th class="text-left">Time</th>
@@ -362,8 +401,8 @@ createApp({
                       <th class="text-right">Price</th>
                       <th class="text-left">ExecType</th>
                       <th class="text-left">Status</th>
-                      <th class="text-left">Type</th>
-                      <th class="text-left">ClOrdID</th>
+                      <th class="text-left">Behavior</th>
+                      <th class="text-right">ClOrdID</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -372,25 +411,21 @@ createApp({
                         :class="orderRowClass(order)">
                       <td class="mono text-slate-400">{{ order.time }}</td>
                       <td class="mono text-white strong">{{ order.symbol }}</td>
-                      <td>
-                        <span class="order-side" :class="order.side === 'SELL' ? 'order-side--sell' : 'order-side--buy'">{{ order.side }}</span>
-                      </td>
+                      <td :class="blotterSideClass(order.side)">{{ order.side }}</td>
                       <td class="mono text-right text-white">{{ order.quantity }}</td>
                       <td class="mono text-right text-slate-300">{{ order.limitPrice }}</td>
                       <td>
-                        <span class="chip" :class="execTypeBadge(order.execType)">{{ order.execType }}</span>
+                        <span class="exec-badge" :class="execTypeBadge(order.execType)">{{ order.execType }}</span>
                       </td>
-                      <td>
-                        <span class="chip">{{ order.status }}</span>
-                      </td>
-                      <td>
-                        <span class="chip">{{ order.source }}</span>
-                      </td>
-                      <td class="mono text-slate-300">{{ order.clOrdId }}</td>
+                      <td :class="blotterStatusClass(order.status)">{{ order.status }}</td>
+                      <td :class="blotterSourceClass(order.source)">{{ order.source }}</td>
+                      <td class="mono text-right text-slate-300">{{ order.clOrdId }}</td>
+                    </tr>
+                    <tr v-if="!recentOrders.length">
+                      <td colspan="9" class="orders-table__empty">Waiting for orders…</td>
                     </tr>
                   </tbody>
                 </table>
-              </div>
             </div>
           </article>
         </section>
@@ -578,11 +613,13 @@ createApp({
     const busyAction = ref('')
     const sessionActionPending = ref('')
     const refreshHandle = ref(null)
+    const overviewRefreshPending = ref(false)
     const previewTimer = ref(null)
     const activePage = ref(pageCodeFromPath(window.location.pathname) || 'order-input')
     const activeMode = ref('single')
     const menuOpen = ref(false)
     const theme = ref(window.localStorage.getItem(THEME_STORAGE_KEY) || 'system')
+    const refreshFrequencyByPage = reactive(loadRefreshFrequencyMap())
     const draftInitialized = ref(false)
     const settingsInitialized = ref(false)
     const settingsDirty = ref(false)
@@ -641,6 +678,14 @@ createApp({
     const previewWarnings = computed(() => preview.warnings || [])
     const pageOptions = computed(() => PAGE_OPTIONS)
     const currentPageLabel = computed(() => pageOptions.value.find(page => page.code === activePage.value)?.label || 'Menu')
+    const refreshFrequencyOptions = computed(() => REFRESH_FREQUENCY_OPTIONS)
+    const activeRefreshSeconds = computed({
+      get: () => sanitizeRefreshFrequency(refreshFrequencyByPage[activePage.value]),
+      set: (seconds) => {
+        refreshFrequencyByPage[activePage.value] = sanitizeRefreshFrequency(seconds)
+        window.localStorage.setItem(REFRESH_FREQUENCY_STORAGE_KEY, JSON.stringify({ ...refreshFrequencyByPage }))
+      }
+    })
     const activeFixVersionCode = computed(() => session.fixVersionCode || settingsDraft.fixVersionCode || 'FIX_44')
     const activeFixVersionLabel = computed(() => fixVersionOptions.value.find(option => option.code === activeFixVersionCode.value)?.label || 'FIX 4.4')
     const currentFixDictionary = computed(() => (fixMetadata.versions || []).find(version => version.code === activeFixVersionCode.value) || null)
@@ -658,26 +703,41 @@ createApp({
     const execTypeBadge = (execType) => {
       const normalized = String(execType || '').trim().toUpperCase()
       if (normalized === 'FILL' || normalized === 'TRADE') {
-        return 'chip--success'
+        return 'exec-badge--success'
       }
       if (normalized === 'PARTIAL_FILL' || normalized === 'PARTIAL') {
-        return 'chip--warn'
+        return 'exec-badge--warn'
       }
       if (normalized === 'REJECT' || normalized === 'REJECTED' || normalized === 'CANCELED' || normalized === 'CANCELLED' || normalized === 'CANCEL' || normalized === 'EXPIRED') {
-        return 'chip--danger'
+        return 'exec-badge--danger'
       }
-      return 'chip--neutral'
+      return 'exec-badge--neutral'
     }
     const orderRowClass = (order) => {
-      const status = String(order?.status || '').toLowerCase()
-      const execType = String(order?.execType || '').toLowerCase()
-      if (status.includes('reject') || execType.includes('reject')) {
-        return ['order-row', 'flash-reject']
-      }
-      if (status.includes('fill') || execType.includes('fill') || status === 'sent' || status === 'new') {
-        return ['order-row', 'flash-fill']
-      }
       return ['order-row']
+    }
+    const blotterSideClass = (side) => {
+      const normalized = String(side || '').trim().toUpperCase()
+      return normalized === 'SELL' || normalized === 'SELL_SHORT'
+        ? 'text-danger strong'
+        : 'text-brand strong'
+    }
+    const blotterStatusClass = (status) => {
+      const normalized = String(status || '').trim().toUpperCase()
+      if (normalized.includes('REJECT') || normalized.includes('CANCEL') || normalized.includes('EXPIRE')) {
+        return 'text-danger'
+      }
+      if (normalized.includes('FILL') || normalized === 'NEW' || normalized === 'SENT') {
+        return 'text-slate-300'
+      }
+      return 'text-slate-400'
+    }
+    const blotterSourceClass = (source) => {
+      const normalized = String(source || '').trim().toUpperCase()
+      if (normalized.includes('AUTO')) {
+        return 'text-slate-400'
+      }
+      return 'text-slate-300'
     }
 
     const themeMediaQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null
@@ -714,6 +774,20 @@ createApp({
       if (theme.value === 'system') {
         applyTheme(theme.value)
       }
+    }
+
+    const clearOverviewRefresh = () => {
+      if (refreshHandle.value) {
+        window.clearTimeout(refreshHandle.value)
+        refreshHandle.value = null
+      }
+    }
+
+    const queueOverviewRefresh = (delayMs = activeRefreshSeconds.value * 1000) => {
+      clearOverviewRefresh()
+      refreshHandle.value = window.setTimeout(() => {
+        runOverviewRefreshCycle().catch(() => {})
+      }, Math.max(250, Number(delayMs) || activeRefreshSeconds.value * 1000))
     }
 
     const apiCall = async (url, options = {}) => {
@@ -821,6 +895,10 @@ createApp({
     }
 
     const loadOverview = async () => {
+      if (overviewRefreshPending.value) {
+        return
+      }
+      overviewRefreshPending.value = true
       try {
         applyOverview(await apiCall('/api/overview'), true, true)
       } catch (error) {
@@ -831,7 +909,14 @@ createApp({
           title: 'Overview unavailable',
           detail: 'The client API could not be reached. Confirm the backend is running.'
         }]
+      } finally {
+        overviewRefreshPending.value = false
       }
+    }
+
+    const runOverviewRefreshCycle = async () => {
+      await loadOverview()
+      queueOverviewRefresh()
     }
 
     const loadFixMetadata = async () => {
@@ -1048,7 +1133,7 @@ createApp({
         return
       }
       activePage.value = resolvedPage
-      if (replaceAlias && currentPath === '/index.html') {
+      if (replaceAlias && (currentPath === '/index.html' || currentPath === '/blotter')) {
         window.history.replaceState({ page: resolvedPage }, '', pagePathForCode(resolvedPage))
       }
     }
@@ -1080,6 +1165,14 @@ createApp({
     }
 
     watch(theme, applyTheme, { immediate: true })
+
+    watch(() => activePage.value, () => {
+      runOverviewRefreshCycle().catch(() => {})
+    })
+
+    watch(activeRefreshSeconds, () => {
+      queueOverviewRefresh()
+    })
 
     watch(() => orderDraft.orderType, () => {
       if (!needsStopPrice.value) {
@@ -1113,16 +1206,14 @@ createApp({
       await loadFixMetadata()
       await loadOverview()
       await previewTicket()
-      refreshHandle.value = window.setInterval(loadOverview, 2000)
+      queueOverviewRefresh()
     })
 
     onUnmounted(() => {
       if (previewTimer.value) {
         window.clearTimeout(previewTimer.value)
       }
-      if (refreshHandle.value) {
-        window.clearInterval(refreshHandle.value)
-      }
+      clearOverviewRefresh()
       window.removeEventListener('popstate', handlePopState)
       window.removeEventListener('click', closeMenu)
       if (themeMediaQuery?.removeEventListener) {
@@ -1145,6 +1236,8 @@ createApp({
       currentPageLabel,
       busyAction,
       theme,
+      refreshFrequencyOptions,
+      activeRefreshSeconds,
       orderDraft,
       bulkDraft,
       preview,
@@ -1168,6 +1261,9 @@ createApp({
       sessionActionBusy,
       sessionButtonLabel,
       execTypeBadge,
+      blotterSideClass,
+      blotterStatusClass,
+      blotterSourceClass,
       orderRowClass,
       settingsState,
       settingsDraft,

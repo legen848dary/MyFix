@@ -46,7 +46,7 @@ class TheFixClientServerRoutingTest {
         server.start();
 
         HttpClient client = HttpClient.newHttpClient();
-        for (String path : List.of("/", "/home", "/order", "/blotter", "/settings")) {
+        for (String path : List.of("/", "/home", "/order", "/orders", "/blotter", "/settings")) {
             HttpResponse<String> response = send(client, path);
             assertEquals(200, response.statusCode(), "Unexpected status for " + path);
             assertTrue(response.headers().firstValue("content-type").orElse("").contains("text/html"), "Expected HTML for " + path);
@@ -67,6 +67,10 @@ class TheFixClientServerRoutingTest {
         HttpResponse<String> trailingSlashRedirect = send(client, "/blotter/");
         assertEquals(308, trailingSlashRedirect.statusCode());
         assertEquals("/blotter", trailingSlashRedirect.headers().firstValue("location").orElse(""));
+
+        HttpResponse<String> ordersTrailingSlashRedirect = send(client, "/orders/");
+        assertEquals(308, ordersTrailingSlashRedirect.statusCode());
+        assertEquals("/orders", ordersTrailingSlashRedirect.headers().firstValue("location").orElse(""));
 
         HttpResponse<String> missingAsset = send(client, "/missing-does-not-exist.js");
         assertEquals(404, missingAsset.statusCode());
