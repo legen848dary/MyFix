@@ -17,6 +17,7 @@ dependencies {
     implementation("org.slf4j:slf4j-api:2.0.17")
     implementation("org.apache.logging.log4j:log4j-core:2.25.3")
     implementation("org.apache.logging.log4j:log4j-slf4j2-impl:2.25.3")
+    implementation("com.h2database:h2:2.2.224")
     implementation("org.quickfixj:quickfixj-core:3.0.0")
     implementation("org.quickfixj:quickfixj-messages-fix42:3.0.0")
     implementation("org.quickfixj:quickfixj-messages-fix44:3.0.0")

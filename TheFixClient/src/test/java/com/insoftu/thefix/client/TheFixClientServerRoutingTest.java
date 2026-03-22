@@ -7,6 +7,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -60,6 +61,16 @@ class TheFixClientServerRoutingTest {
         assertTrue(apiHealth.headers().firstValue("content-type").orElse("").contains("application/json"));
         assertTrue(apiHealth.body().contains("\"status\":\"UP\""));
 
+        HttpResponse<String> templates = send(client, "/api/templates");
+        assertEquals(200, templates.statusCode());
+        assertTrue(templates.body().contains("\"templates\""));
+
+        HttpResponse<String> saveTemplate = post(client, "/api/templates/save", """
+                {"name":"Routing test template","draft":{"messageType":"NEW_ORDER_SINGLE","symbol":"AAPL","side":"BUY","quantity":10,"price":100.25}}
+                """);
+        assertEquals(200, saveTemplate.statusCode());
+        assertTrue(saveTemplate.body().contains("Routing test template"));
+
         HttpResponse<String> appJs = send(client, "/app.js");
         assertEquals(200, appJs.statusCode());
         assertTrue(appJs.body().contains("createApp({"));
@@ -80,6 +91,15 @@ class TheFixClientServerRoutingTest {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("http://127.0.0.1:" + server.actualPort() + path))
                 .GET()
+                .build();
+        return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> post(HttpClient client, String path, String payload) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + server.actualPort() + path))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
                 .build();
         return client.send(request, HttpResponse.BodyHandlers.ofString());
     }

@@ -184,6 +184,24 @@ createApp({
                 <button class="tab" :class="{ 'tab--active': activeMode === 'single' }" @click="activeMode = 'single'">Single Message</button>
                 <button class="tab" :class="{ 'tab--active': activeMode === 'bulk' }" @click="activeMode = 'bulk'">Bulk NOS</button>
               </div>
+              <div class="workflow-toolbar__templates">
+                <label class="template-picker" aria-label="Saved FIX message templates">
+                  <span class="template-picker__label">Saved templates</span>
+                  <select v-model="selectedTemplateId" class="template-picker__control" @change="applySelectedTemplate">
+                    <option value="">Select template</option>
+                    <option v-for="template in messageTemplates" :key="template.id" :value="String(template.id)">
+                      {{ template.name }}
+                    </option>
+                  </select>
+                </label>
+                <div class="field field--template-name">
+                  <span class="field__label">Template name</span>
+                  <input v-model="templateNameDraft" placeholder="Growth buy USD limit" />
+                </div>
+                <button class="button button--soft" @click="saveCurrentTemplate" :disabled="busyAction === 'save-template'">
+                  {{ busyAction === 'save-template' ? 'Saving…' : 'Save template' }}
+                </button>
+              </div>
               <div class="workflow-toolbar__actions">
                 <button v-if="activeMode === 'single'" class="button button--primary" @click="sendTicket" :disabled="busyAction === 'send'">Send FIX message</button>
                 <template v-else-if="selectedMessageType?.supportsBulk">
@@ -609,6 +627,7 @@ createApp({
 
     const recentEvents = ref([])
     const recentOrders = ref([])
+    const messageTemplates = ref([])
     const apiStatus = ref('Connecting…')
     const busyAction = ref('')
     const sessionActionPending = ref('')
@@ -627,6 +646,8 @@ createApp({
     const selectedProfileName = ref(TheFixSessionProfileNameFallback())
     const storagePathDraft = ref('')
     const selectedSuggestedTagKey = ref('')
+    const selectedTemplateId = ref('')
+    const templateNameDraft = ref('')
 
     const orderDraft = reactive({
       messageType: 'NEW_ORDER_SINGLE',
@@ -914,6 +935,88 @@ createApp({
       }
     }
 
+    const applyTemplates = (payload) => {
+      const templates = payload?.templates?.items || payload?.items || []
+      const previousSelection = String(selectedTemplateId.value || '')
+      messageTemplates.value = templates
+      if (payload?.savedTemplateId) {
+        selectedTemplateId.value = String(payload.savedTemplateId)
+      } else if (!templates.some(template => String(template.id) === previousSelection)) {
+        selectedTemplateId.value = ''
+      }
+      if (selectedTemplateId.value) {
+        const selectedTemplate = templates.find(template => String(template.id) === String(selectedTemplateId.value))
+        if (selectedTemplate) {
+          templateNameDraft.value = selectedTemplate.name || templateNameDraft.value
+        }
+      }
+    }
+
+    const loadTemplates = async () => {
+      try {
+        applyTemplates(await apiCall('/api/templates'))
+      } catch (error) {
+        console.warn('Unable to load FIX message templates', error)
+      }
+    }
+
+    const cloneAdditionalTags = (items) => Array.isArray(items)
+      ? items.map(tag => ({
+        tag: Number(tag?.tag || 0),
+        name: tag?.name || '',
+        value: tag?.value || '',
+        custom: Boolean(tag?.custom)
+      }))
+      : []
+
+    const applyTemplateDraft = (draft) => {
+      if (!draft) {
+        return
+      }
+      Object.assign(orderDraft, {
+        messageType: draft.messageType || 'NEW_ORDER_SINGLE',
+        clOrdId: draft.clOrdId || '',
+        origClOrdId: draft.origClOrdId || '',
+        region: draft.region || 'AMERICAS',
+        market: draft.market || 'XNAS',
+        symbol: draft.symbol || 'AAPL',
+        side: draft.side || 'BUY',
+        quantity: Number(draft.quantity ?? 100),
+        orderType: draft.orderType || 'LIMIT',
+        priceType: draft.priceType || 'PER_UNIT',
+        timeInForce: draft.timeInForce || 'DAY',
+        currency: draft.currency || 'USD',
+        price: Number(draft.price ?? 100.25),
+        stopPrice: Number(draft.stopPrice ?? 0)
+      })
+      orderDraft.additionalTags = cloneAdditionalTags(draft.additionalTags)
+      selectedSuggestedTagKey.value = ''
+    }
+
+    const applySelectedTemplate = () => {
+      const selectedTemplate = messageTemplates.value.find(template => String(template.id) === String(selectedTemplateId.value))
+      if (!selectedTemplate) {
+        return
+      }
+      templateNameDraft.value = selectedTemplate.name || ''
+      applyTemplateDraft(selectedTemplate.draft || {})
+    }
+
+    const saveCurrentTemplate = async () => runAction('save-template', async () => {
+      const templateName = (templateNameDraft.value || '').trim()
+      if (!templateName) {
+        window.alert('Template name is required before saving.')
+        return
+      }
+      applyTemplates(await apiCall('/api/templates/save', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: templateName,
+          draft: buildOrderPayload()
+        })
+      }))
+    })
+
     const runOverviewRefreshCycle = async () => {
       await loadOverview()
       queueOverviewRefresh()
@@ -1022,6 +1125,7 @@ createApp({
         method: 'POST',
         body: JSON.stringify(buildOrderPayload())
       }), true)
+      await loadTemplates()
     })
 
     const startBulkFlow = async () => runAction('flow-start', async () => {
@@ -1170,6 +1274,12 @@ createApp({
       runOverviewRefreshCycle().catch(() => {})
     })
 
+    watch(() => settingsState.activeProfileName, () => {
+      selectedTemplateId.value = ''
+      templateNameDraft.value = ''
+      loadTemplates().catch(() => {})
+    })
+
     watch(activeRefreshSeconds, () => {
       queueOverviewRefresh()
     })
@@ -1205,6 +1315,7 @@ createApp({
       syncPageFromLocation(true)
       await loadFixMetadata()
       await loadOverview()
+      await loadTemplates()
       await previewTicket()
       queueOverviewRefresh()
     })
@@ -1228,6 +1339,7 @@ createApp({
       session,
       kpis,
       recentOrders,
+      messageTemplates,
       apiStatus,
       activePage,
       activeMode,
@@ -1258,6 +1370,8 @@ createApp({
       needsLimitPrice,
       needsStopPrice,
       selectedSuggestedTagKey,
+      selectedTemplateId,
+      templateNameDraft,
       sessionActionBusy,
       sessionButtonLabel,
       execTypeBadge,
@@ -1286,6 +1400,8 @@ createApp({
       addCustomTag,
       addSuggestedTag,
       removeAdditionalTag,
+      applySelectedTemplate,
+      saveCurrentTemplate,
       onRegionChange,
       onMarketChange,
       toggleMenu,

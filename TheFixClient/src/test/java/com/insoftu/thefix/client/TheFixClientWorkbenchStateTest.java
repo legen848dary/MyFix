@@ -150,6 +150,55 @@ class TheFixClientWorkbenchStateTest {
         state.close();
     }
 
+    @Test
+    void manualTemplateSavePersistsTheCurrentDraft() {
+        TheFixClientWorkbenchState state = createState();
+
+        JsonObject response = state.saveMessageTemplate(new JsonObject()
+                .put("name", "Opening buy template")
+                .put("draft", new JsonObject()
+                        .put("messageType", "NEW_ORDER_SINGLE")
+                        .put("symbol", "AAPL")
+                        .put("side", "BUY")
+                        .put("quantity", 250)
+                        .put("price", 101.25)));
+
+        JsonObject templateSnapshot = response.getJsonObject("templates");
+        assertNotNull(templateSnapshot);
+        assertEquals(1, templateSnapshot.getJsonArray("items").size());
+        JsonObject template = templateSnapshot.getJsonArray("items").getJsonObject(0);
+        assertEquals("Opening buy template", template.getString("name"));
+        assertEquals("AAPL", template.getJsonObject("draft").getString("symbol"));
+        state.close();
+    }
+
+    @Test
+    void sendOrderAutoSavesATemplateForValidSingleMessages() {
+        TheFixClientWorkbenchState state = createState();
+
+        state.sendOrder(new JsonObject()
+                .put("messageType", "NEW_ORDER_SINGLE")
+                .put("region", "AMERICAS")
+                .put("market", "XNAS")
+                .put("symbol", "MSFT")
+                .put("side", "BUY")
+                .put("quantity", 100)
+                .put("orderType", "LIMIT")
+                .put("priceType", "PER_UNIT")
+                .put("timeInForce", "DAY")
+                .put("currency", "USD")
+                .put("price", 101.75)
+                .put("stopPrice", 0.0));
+
+        JsonObject templateSnapshot = state.templateSnapshot().getJsonObject("templates");
+        assertNotNull(templateSnapshot);
+        assertEquals(1, templateSnapshot.getJsonArray("items").size());
+        JsonObject template = templateSnapshot.getJsonArray("items").getJsonObject(0);
+        assertTrue(template.getBoolean("autoSaved"));
+        assertEquals("MSFT", template.getJsonObject("draft").getString("symbol"));
+        state.close();
+    }
+
     private static TheFixClientConfig testConfig() {
         return new TheFixClientConfig(
                 "0.0.0.0",
@@ -171,7 +220,7 @@ class TheFixClientWorkbenchStateTest {
     private TheFixClientWorkbenchState createState() {
         TheFixSessionProfileStore store = new TheFixSessionProfileStore(testConfig());
         store.updateStoragePath(tempDir.toString());
-        return new TheFixClientWorkbenchState(testConfig(), store);
+        return new TheFixClientWorkbenchState(testConfig(), store, new TheFixMessageTemplateStore(tempDir.resolve("templates-db").resolve("message-templates")));
     }
 }
 

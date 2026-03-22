@@ -77,17 +77,23 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
 
     private final TheFixClientConfig config;
     private final TheFixSessionProfileStore profileStore;
+    private final TheFixMessageTemplateStore templateStore;
     private final TheFixClientFixService fixService;
 
     private int pulseChecks;
 
     TheFixClientWorkbenchState(TheFixClientConfig config) {
-        this(config, new TheFixSessionProfileStore(config));
+        this(config, new TheFixSessionProfileStore(config), new TheFixMessageTemplateStore(config));
     }
 
     TheFixClientWorkbenchState(TheFixClientConfig config, TheFixSessionProfileStore profileStore) {
+        this(config, profileStore, new TheFixMessageTemplateStore(config));
+    }
+
+    TheFixClientWorkbenchState(TheFixClientConfig config, TheFixSessionProfileStore profileStore, TheFixMessageTemplateStore templateStore) {
         this.config = config;
         this.profileStore = profileStore;
+        this.templateStore = templateStore;
         this.fixService = new TheFixClientFixService(config, profileStore);
     }
 
@@ -133,6 +139,7 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         if (!preview.warnings().isEmpty()) {
             return snapshot();
         }
+        templateStore.autoSaveTemplate(activeProfileName(), orderDraftJson(preview.toOrderRequest()));
         fixService.sendOrder(preview.toOrderRequest());
         return snapshot();
     }
@@ -173,6 +180,20 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         return new JsonObject().put("settings", profileStore.snapshot());
     }
 
+    synchronized JsonObject templateSnapshot() {
+        return new JsonObject().put("templates", templateStore.snapshot(activeProfileName()));
+    }
+
+    synchronized JsonObject saveMessageTemplate(JsonObject request) {
+        JsonObject effectiveRequest = request == null ? new JsonObject() : request;
+        TheFixMessageTemplate savedTemplate = templateStore.saveManualTemplate(
+                activeProfileName(),
+                effectiveRequest.getString("name"),
+                effectiveRequest.getJsonObject("draft", defaultOrderJson())
+        );
+        return templateSnapshot().put("savedTemplateId", savedTemplate.id());
+    }
+
     synchronized JsonObject fixMetadataSnapshot() {
         return FIX_DICTIONARY_CATALOG.snapshot();
     }
@@ -198,6 +219,34 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
     @Override
     public synchronized void close() {
         fixService.close();
+        templateStore.close();
+    }
+
+    private String activeProfileName() {
+        return profileStore.activeProfile().name();
+    }
+
+    private JsonObject orderDraftJson(TheFixOrderRequest request) {
+        JsonArray additionalTags = new JsonArray();
+        for (TheFixTagEntry additionalTag : request.additionalTags()) {
+            additionalTags.add(additionalTag.toJson());
+        }
+        return new JsonObject()
+                .put("messageType", request.messageTypeCode())
+                .put("clOrdId", request.clOrdId())
+                .put("origClOrdId", request.origClOrdId())
+                .put("region", request.region())
+                .put("market", request.market())
+                .put("symbol", request.symbol())
+                .put("side", request.side())
+                .put("quantity", request.quantity())
+                .put("orderType", request.orderType())
+                .put("priceType", request.priceType())
+                .put("timeInForce", request.timeInForce())
+                .put("currency", request.currency())
+                .put("price", request.price())
+                .put("stopPrice", request.stopPrice())
+                .put("additionalTags", additionalTags);
     }
 
     private OrderPreview buildPreview(JsonObject request) {
