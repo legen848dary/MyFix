@@ -4,21 +4,21 @@ This file records the last verified commit that stayed under the latency target 
 
 ## Last known good baseline
 
-- Verified on: 2026-03-23
-- Commit hash: `ad8e928b592aab9e27a63053eae383e19668af78`
+- Verified on: 2026-03-24
+- Commit hash: `90c9297f1a8390e9bdd3a7fb05e483162b5e7edf`
 - Benchmark mode: direct JVM, no Docker
 - Benchmark rate: `500 msg/s`
 - p50 latency: `4 µs`
-- p90 latency: `41 µs`
-- Benchmark artifact: `TheFixSimulator/logs/direct-jvm-benchmark-reports/20260323-205843`
+- p90 latency: `6 µs`
+- Benchmark artifact: `TheFixSimulator/logs/direct-jvm-benchmark-reports/20260324-004235`
 
 ## Update rule
 
 Only update this file after:
-1. rebuilding the simulator,
-2. rerunning the direct-JVM benchmark,
-3. confirming `p90 < 100 µs` at `500 msg/s`, and
-4. confirming the build is green.
+1. running from a clean committed git worktree with an upstream branch configured,
+2. rebuilding the simulator,
+3. rerunning the direct-JVM benchmark,
+4. confirming `p90 < 100 µs` at `500 msg/s`, and
+5. confirming the build is green.
 
 Keep the previous good entry if a later change regresses latency.
-
