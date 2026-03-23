@@ -1,6 +1,7 @@
 package com.llexsimulator.testutil;
 
 import com.llexsimulator.disruptor.OrderEvent;
+import com.llexsimulator.disruptor.OrderRequestType;
 import com.llexsimulator.sbe.FillBehaviorType;
 import com.llexsimulator.sbe.FillInstructionDecoder;
 import com.llexsimulator.sbe.FixVersion;
@@ -49,6 +50,42 @@ public final class OrderEventFixtures {
     public static FillInstructionDecoder decodeFillInstruction(OrderEvent event) {
         event.fillInstructionDecoder.wrapAndApplyHeader(event.fillInstructionBuffer, 0, event.headerDecoder);
         return event.fillInstructionDecoder;
+    }
+
+    public static OrderEvent newCancelRequestEvent(long correlationId, long sessionConnectionId,
+                                                   String clOrdId, String origClOrdId,
+                                                   OrderSide side, String symbol) {
+        OrderEvent event = newLimitOrderEvent(correlationId, sessionConnectionId, side, 0L, 0L);
+        event.requestType = OrderRequestType.CANCEL;
+        event.nosEncoder.wrapAndApplyHeader(event.orderBuffer, 0, event.headerEncoder)
+                .correlationId(correlationId)
+                .sessionConnectionId(sessionConnectionId)
+                .arrivalTimeNs(event.arrivalTimeNs)
+                .side(side)
+                .orderType(OrderType.LIMIT)
+                .timeInForce(TimeInForce.DAY)
+                .orderQty(0L)
+                .price(0L)
+                .stopPx(0L)
+                .transactTimeNs(event.arrivalTimeNs)
+                .fixVersion(FixVersion.FIX44);
+        event.nosEncoder.putClOrdId(ascii36(clOrdId), 0);
+        event.nosEncoder.putSymbol(ascii16(symbol), 0);
+        System.arraycopy(ascii36(origClOrdId), 0, event.origClOrdIdBytes, 0, 36);
+        event.nosDecoder.wrapAndApplyHeader(event.orderBuffer, 0, event.headerDecoder);
+        return event;
+    }
+
+    public static OrderEvent newAmendRequestEvent(long correlationId, long sessionConnectionId,
+                                                  String clOrdId, String origClOrdId,
+                                                  OrderSide side, long orderQty, long price, String symbol) {
+        OrderEvent event = newLimitOrderEvent(correlationId, sessionConnectionId, side, orderQty, price);
+        event.requestType = OrderRequestType.AMEND;
+        event.nosEncoder.putClOrdId(ascii36(clOrdId), 0);
+        event.nosEncoder.putSymbol(ascii16(symbol), 0);
+        System.arraycopy(ascii36(origClOrdId), 0, event.origClOrdIdBytes, 0, 36);
+        event.nosDecoder.wrapAndApplyHeader(event.orderBuffer, 0, event.headerDecoder);
+        return event;
     }
 
     public static void writeFillInstruction(OrderEvent event,

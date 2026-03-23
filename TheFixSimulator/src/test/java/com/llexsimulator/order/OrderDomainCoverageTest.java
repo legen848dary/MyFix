@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
+import static com.llexsimulator.testutil.OrderEventFixtures.ascii36;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -129,8 +130,11 @@ class OrderDomainCoverageTest {
         assertNotNull(claimed);
         claimed.setCorrelationId(101L);
         claimed.setOrderQty(777L);
+        claimed.setClOrdId(ascii36("CL-101"), 0, 36);
+        repository.indexClOrdId(101L, ascii36("CL-101"), 36);
 
         assertSame(claimed, repository.get(101L));
+        assertSame(claimed, repository.findByClOrdId(ascii36("CL-101"), 36));
         assertEquals(1, repository.activeCount());
         assertEquals(0, repository.pooledCount());
         assertNull(repository.claim(202L));
@@ -140,6 +144,7 @@ class OrderDomainCoverageTest {
         assertEquals(1, repository.pooledCount());
         assertEquals(0L, claimed.getCorrelationId());
         assertEquals(0L, claimed.getOrderQty());
+        assertNull(repository.findByClOrdId(ascii36("CL-101"), 36));
 
         repository.release(999L);
         assertEquals(1, repository.pooledCount());

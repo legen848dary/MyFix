@@ -2,6 +2,7 @@ package com.llexsimulator.disruptor.handler;
 
 import com.llexsimulator.aeron.MetricsPublisher;
 import com.llexsimulator.disruptor.OrderEvent;
+import com.llexsimulator.disruptor.OrderRequestType;
 import com.llexsimulator.metrics.MetricsRegistry;
 import com.llexsimulator.sbe.FillBehaviorType;
 import com.llexsimulator.sbe.OrderSide;
@@ -57,11 +58,30 @@ public final class MetricsPublishHandler implements EventHandler<OrderEvent> {
         registry.incrementOrdersReceived();
 
         FillBehaviorType behavior = event.fillInstructionDecoder.fillBehavior();
-        switch (behavior) {
-            case REJECT                         -> registry.incrementRejects();
-            case NO_FILL_IOC_CANCEL             -> registry.incrementCancels();
-            case PARTIAL_THEN_CANCEL            -> { registry.incrementFills(); registry.incrementCancels(); }
-            default                             -> registry.incrementFills();
+        if (event.requestType == OrderRequestType.CANCEL) {
+            if (behavior == FillBehaviorType.REJECT || event.referencedCorrelationId == 0L) {
+                registry.incrementRejects();
+            } else {
+                registry.incrementCancels();
+            }
+        } else if (event.requestType == OrderRequestType.AMEND) {
+            if (behavior == FillBehaviorType.REJECT || event.referencedCorrelationId == 0L) {
+                registry.incrementRejects();
+            } else {
+                registry.incrementCancels();
+                switch (behavior) {
+                    case NO_FILL_IOC_CANCEL  -> registry.incrementCancels();
+                    case PARTIAL_THEN_CANCEL -> { registry.incrementFills(); registry.incrementCancels(); }
+                    default                  -> registry.incrementFills();
+                }
+            }
+        } else {
+            switch (behavior) {
+                case REJECT              -> registry.incrementRejects();
+                case NO_FILL_IOC_CANCEL  -> registry.incrementCancels();
+                case PARTIAL_THEN_CANCEL -> { registry.incrementFills(); registry.incrementCancels(); }
+                default                  -> registry.incrementFills();
+            }
         }
 
         if (++eventCounter % publishInterval == 0) {

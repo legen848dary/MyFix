@@ -1,6 +1,7 @@
 package com.llexsimulator.disruptor.handler;
 
 import com.llexsimulator.disruptor.OrderEvent;
+import com.llexsimulator.disruptor.OrderRequestType;
 import com.llexsimulator.sbe.FillBehaviorType;
 import com.llexsimulator.sbe.OrderSide;
 import com.llexsimulator.sbe.OrderType;
@@ -20,14 +21,25 @@ public final class ValidationHandler implements EventHandler<OrderEvent> {
     public void onEvent(OrderEvent event, long sequence, boolean endOfBatch) {
         // Basic field validation — all reads from off-heap SBE flyweight
         boolean valid = true;
-        String  reason = null;
+        RejectReason rejectReason = RejectReason.SIMULATOR_REJECT;
 
-        if (event.nosDecoder.side() == OrderSide.NULL_VAL) {
-            valid = false; reason = "Missing Side";
-        } else if (event.nosDecoder.orderQty() <= 0) {
-            valid = false; reason = "Invalid OrderQty";
-        } else if (event.nosDecoder.orderType() == OrderType.LIMIT && event.nosDecoder.price() <= 0) {
-            valid = false; reason = "LIMIT order missing Price";
+        if (event.requestType == OrderRequestType.CANCEL) {
+            if (isBlank(event.origClOrdIdBytes)) {
+                valid = false;
+            } else if (event.nosDecoder.side() == OrderSide.NULL_VAL) {
+                valid = false;
+            }
+        } else {
+            if (isBlank(event.origClOrdIdBytes) && event.requestType == OrderRequestType.AMEND) {
+                valid = false;
+            } else if (event.nosDecoder.side() == OrderSide.NULL_VAL) {
+                valid = false;
+            } else if (event.nosDecoder.orderQty() <= 0) {
+                valid = false;
+            } else if (event.nosDecoder.orderType() == OrderType.LIMIT && event.nosDecoder.price() <= 0) {
+                valid = false;
+                rejectReason = RejectReason.INVALID_PRICE;
+            }
         }
 
         event.isValid = valid;
@@ -43,7 +55,7 @@ public final class ValidationHandler implements EventHandler<OrderEvent> {
                     .numPartialFills((short) 0)
                     .delayNs(0L)
                     .fillPrice(0L)
-                    .rejectReasonCode(RejectReason.INVALID_PRICE)
+                    .rejectReasonCode(rejectReason)
                     .randomMinQtyPct(0)
                     .randomMaxQtyPct(0)
                     .randomMinDelayNs(0L)
@@ -53,6 +65,15 @@ public final class ValidationHandler implements EventHandler<OrderEvent> {
             event.fillInstructionDecoder.wrapAndApplyHeader(
                     event.fillInstructionBuffer, 0, event.headerDecoder);
         }
+    }
+
+    private static boolean isBlank(byte[] bytes) {
+        for (byte value : bytes) {
+            if (value != 0 && value != ' ') {
+                return false;
+            }
+        }
+        return true;
     }
 }
 

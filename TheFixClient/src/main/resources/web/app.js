@@ -4,10 +4,10 @@ const THEME_STORAGE_KEY = 'thefixclient-theme'
 const THEME_OPTIONS = Object.freeze(['system', 'dark', 'light', 'light2', 'hsbc-dark'])
 const THEME_CHOICES = Object.freeze([
   { value: 'system', label: 'System' },
-  { value: 'dark', label: 'Dark' },
+  { value: 'dark', label: 'Dark - Green' },
   { value: 'light', label: 'Light' },
   { value: 'light2', label: 'Light2' },
-  { value: 'hsbc-dark', label: 'HSBC Dark' }
+  { value: 'hsbc-dark', label: 'Dark - RED' }
 ])
 const REFRESH_FREQUENCY_STORAGE_KEY = 'thefixclient-refresh-frequency'
 const DEFAULT_REFRESH_SECONDS = 3
@@ -203,7 +203,7 @@ createApp({
                 <h2 class="panel__title">Create FIX message</h2>
                 <p class="panel__copy">Build live FIX messages with version-aware tags, custom FIDs, and bulk NOS routing from one operator surface.</p>
               </div>
-              <span class="chip">{{ preview.status || 'Draft ready' }}</span>
+              <span class="chip">{{ previewStatusLabel }}</span>
             </div>
 
             <div class="workflow-toolbar">
@@ -793,6 +793,7 @@ createApp({
     const needsLimitPrice = computed(() => orderDraft.messageType !== 'ORDER_CANCEL_REQUEST' && Boolean(selectedOrderType.value?.requiresLimitPrice))
     const needsStopPrice = computed(() => orderDraft.messageType !== 'ORDER_CANCEL_REQUEST' && Boolean(selectedOrderType.value?.requiresStopPrice))
     const previewWarnings = computed(() => preview.warnings || [])
+    const previewStatusLabel = computed(() => preview.status || (session.connected ? 'READY_FOR_ROUTING' : 'READY_PENDING_CONNECTION'))
     const pageOptions = computed(() => PAGE_OPTIONS)
     const currentPageLabel = computed(() => pageOptions.value.find(page => page.code === activePage.value)?.label || 'Menu')
     const themeChoices = computed(() => THEME_CHOICES)
@@ -1598,6 +1599,7 @@ createApp({
       orderDraft,
       bulkDraft,
       preview,
+      previewStatusLabel,
       previewWarnings,
       regions,
       sides,

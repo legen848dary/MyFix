@@ -3,6 +3,8 @@ package com.llexsimulator.disruptor;
 import com.llexsimulator.engine.FixConnection;
 import com.llexsimulator.sbe.*;
 import com.lmax.disruptor.EventTranslatorVararg;
+
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicLong;
 import uk.co.real_logic.artio.decoder.NewOrderSingleDecoder;
 import uk.co.real_logic.artio.decoder.OrderCancelReplaceRequestDecoder;
@@ -47,7 +49,10 @@ public final class OrderEventTranslator implements EventTranslatorVararg<OrderEv
         event.correlationId       = CORRELATION_COUNTER.incrementAndGet();
         event.sessionConnectionId = sessionConnId;
         event.arrivalTimeNs       = arrivalNs;
+        event.referencedCorrelationId = 0L;
+        event.requestType         = OrderRequestType.NEW;
         event.isValid             = false;
+        Arrays.fill(event.origClOrdIdBytes, (byte) ' ');
 
         // ── Encode into pre-allocated orderBuffer using SBE ──────────────────
         NewOrderSingleEncoder encoder = event.nosEncoder;
@@ -59,6 +64,7 @@ public final class OrderEventTranslator implements EventTranslatorVararg<OrderEv
 
         switch (decodedMessage) {
             case NewOrderSingleDecoder decoder -> {
+                event.requestType = OrderRequestType.NEW;
                 copyCharsToBytes(decoder.clOrdID(), decoder.clOrdIDLength(), clOrdBuf, 36);
                 copyCharsToBytes(decoder.symbol(), decoder.symbolLength(), symbolBuf, 16);
                 encoder.side(mapSide(decoder.side()));
@@ -72,7 +78,9 @@ public final class OrderEventTranslator implements EventTranslatorVararg<OrderEv
                 encoder.transactTimeNs(arrivalNs);
             }
             case OrderCancelReplaceRequestDecoder decoder -> {
+                event.requestType = OrderRequestType.AMEND;
                 copyCharsToBytes(decoder.clOrdID(), decoder.clOrdIDLength(), clOrdBuf, 36);
+                copyCharsToBytes(decoder.origClOrdID(), decoder.origClOrdIDLength(), event.origClOrdIdBytes, 36);
                 copyCharsToBytes(decoder.symbol(), decoder.symbolLength(), symbolBuf, 16);
                 encoder.side(mapSide(decoder.side()));
                 encoder.orderType(mapOrdType(decoder.ordType()));
@@ -85,7 +93,9 @@ public final class OrderEventTranslator implements EventTranslatorVararg<OrderEv
                 encoder.transactTimeNs(arrivalNs);
             }
             case OrderCancelRequestDecoder decoder -> {
+                event.requestType = OrderRequestType.CANCEL;
                 copyCharsToBytes(decoder.clOrdID(), decoder.clOrdIDLength(), clOrdBuf, 36);
+                copyCharsToBytes(decoder.origClOrdID(), decoder.origClOrdIDLength(), event.origClOrdIdBytes, 36);
                 copyCharsToBytes(decoder.symbol(), decoder.symbolLength(), symbolBuf, 16);
                 encoder.side(mapSide(decoder.side()));
                 encoder.orderType(OrderType.LIMIT);

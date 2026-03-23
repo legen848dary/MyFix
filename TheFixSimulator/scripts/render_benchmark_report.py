@@ -209,6 +209,7 @@ def main() -> int:
         <span class=\"badge\">Rate: {html.escape(metadata.get('rate', 'n/a'))} msg/s</span>
         <span class=\"badge\">Duration: {html.escape(metadata.get('duration_sec', 'n/a'))} s</span>
         <span class=\"badge\">Web Port: {html.escape(metadata.get('web_port', 'n/a'))}</span>
+        <span class="badge">Wait Strategy: {html.escape(metadata.get('wait_strategy', 'n/a'))}</span>
         <span class=\"badge\">Benchmark Mode Changed: {html.escape(metadata.get('benchmark_mode_changed', 'n/a'))}</span>
       </div>
       <div class=\"grid summary\">{summary_tiles}</div>

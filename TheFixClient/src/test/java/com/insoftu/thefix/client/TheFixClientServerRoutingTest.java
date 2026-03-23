@@ -62,8 +62,11 @@ class TheFixClientServerRoutingTest {
         assertTrue(appJsFromAsset.body().contains("'order-input': '/home'"));
         assertTrue(appJsFromAsset.body().contains("case '/neworder':"));
         assertTrue(appJsFromAsset.body().contains("'hsbc-dark'"));
+        assertTrue(appJsFromAsset.body().contains("Dark - Green"));
         assertTrue(appJsFromAsset.body().contains("toggleThemeMenu"));
         assertTrue(appJsFromAsset.body().contains("toggleRefreshMenu"));
+        assertTrue(appJsFromAsset.body().contains("previewStatusLabel"));
+        assertTrue(appJsFromAsset.body().contains("READY_PENDING_CONNECTION"));
         assertTrue(appJsFromAsset.body().contains("reconcileSessionActionPending"));
         assertTrue(appJsFromAsset.body().contains("shouldKeepConnectPending"));
 

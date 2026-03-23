@@ -775,11 +775,11 @@ Mount a custom config without rebuilding:
 
 The `docker-compose.yml` mounts `./config/` as a read-only volume inside the container.
 
-For lower-noise latency runs, set `benchmark.mode.enabled=true` in `./config/simulator.properties` and restart the simulator. This keeps the REST/health endpoints available but disables the live Aeron/WebSocket metrics fan-out used by the GUI.
+For lower-noise latency runs, set `benchmark.mode.enabled=true` and a low-latency `wait.strategy` such as `BUSY_SPIN` in `./config/simulator.properties`, then restart the simulator. This keeps the REST/health endpoints available but disables the live Aeron/WebSocket metrics fan-out used by the GUI.
 
 ### Benchmark Runs
 
-Use the benchmark runners instead of toggling `benchmark.mode.enabled` manually. They enable benchmark mode temporarily, run the demo client at the requested rate, capture logs/statistics, generate a colorful HTML report, and then restore the original config/state.
+Use the benchmark runners instead of toggling `benchmark.mode.enabled` manually. They temporarily enable benchmark mode, temporarily force `wait.strategy=BUSY_SPIN` by default (override with the `BENCHMARK_WAIT_STRATEGY` environment variable if needed), run the demo client at the requested rate, capture logs/statistics, generate a colorful HTML report, and then restore the original config/state.
 
 #### Local benchmark run
 

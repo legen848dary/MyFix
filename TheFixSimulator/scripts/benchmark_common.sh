@@ -20,6 +20,7 @@ BENCHMARK_REPORT_RENDERER="${BENCHMARK_REPORT_RENDERER:-${BENCHMARK_SCRIPTS_DIR}
 BENCHMARK_ARTIFACTS_ROOT="${BENCHMARK_ARTIFACTS_ROOT:-${FIX_DEMO_ROOT}/logs/benchmark-reports}"
 BENCHMARK_SIMULATOR_LOG_LINES="${BENCHMARK_SIMULATOR_LOG_LINES:-200}"
 BENCHMARK_CLIENT_LOG_LINES="${BENCHMARK_CLIENT_LOG_LINES:-200}"
+BENCHMARK_WAIT_STRATEGY="${BENCHMARK_WAIT_STRATEGY:-BUSY_SPIN}"
 
 BENCHMARK_RATE="${BENCHMARK_RATE_DEFAULT}"
 BENCHMARK_DURATION_SEC="${BENCHMARK_DURATION_DEFAULT}"
@@ -49,13 +50,14 @@ ${BOLD}Defaults:${RESET}
 
 ${BOLD}What it does:${RESET}
   1. Temporarily enables ${BOLD}benchmark.mode.enabled=true${RESET} in ${BENCHMARK_CONFIG_FILE}
-  2. Starts/restarts the simulator only if needed
-  3. Resets /api/statistics
-  4. Runs the Docker demo FIX client at the requested rate
-  5. Sleeps for the requested duration
-  6. Captures health, stats, Docker usage, and log tails under ${BENCHMARK_ARTIFACTS_ROOT}/<timestamp>/
-  7. Renders a colorful self-contained HTML report
-  8. Restores the original benchmark-mode config and simulator state
+  2. Temporarily sets ${BOLD}wait.strategy=${BENCHMARK_WAIT_STRATEGY}${RESET} for low-latency measurement
+  3. Starts/restarts the simulator only if needed
+  4. Resets /api/statistics
+  5. Runs the Docker demo FIX client at the requested rate
+  6. Sleeps for the requested duration
+  7. Captures health, stats, Docker usage, and log tails under ${BENCHMARK_ARTIFACTS_ROOT}/<timestamp>/
+  8. Renders a colorful self-contained HTML report
+  9. Restores the original benchmark-mode config and simulator state
 
 ${BOLD}Examples:${RESET}
   ${BENCHMARK_INVOCATION}
@@ -171,6 +173,25 @@ print(value)
 PY
 }
 
+current_wait_strategy_value() {
+    BENCHMARK_CONFIG_FILE="${BENCHMARK_CONFIG_FILE}" python3 - <<'PY'
+import os
+from pathlib import Path
+path = Path(os.environ["BENCHMARK_CONFIG_FILE"])
+value = ""
+for raw in path.read_text().splitlines():
+    line = raw.strip()
+    if not line or line.startswith('#'):
+        continue
+    if '=' not in line:
+        continue
+    key, val = line.split('=', 1)
+    if key.strip() == 'wait.strategy':
+        value = val.strip()
+print(value)
+PY
+}
+
 set_benchmark_mode_value() {
     local target_value="$1"
     BENCHMARK_CONFIG_FILE="${BENCHMARK_CONFIG_FILE}" BENCHMARK_CONFIG_TARGET_VALUE="${target_value}" python3 - <<'PY'
@@ -194,6 +215,33 @@ if not found:
     if updated and updated[-1] != '':
         updated.append('')
     updated.append(f'benchmark.mode.enabled={target_value}')
+path.write_text('\n'.join(updated) + '\n')
+PY
+}
+
+set_wait_strategy_value() {
+    local target_value="$1"
+    BENCHMARK_CONFIG_FILE="${BENCHMARK_CONFIG_FILE}" BENCHMARK_WAIT_STRATEGY_TARGET_VALUE="${target_value}" python3 - <<'PY'
+import os
+from pathlib import Path
+path = Path(os.environ["BENCHMARK_CONFIG_FILE"])
+target_value = os.environ["BENCHMARK_WAIT_STRATEGY_TARGET_VALUE"]
+lines = path.read_text().splitlines()
+updated = []
+found = False
+for raw in lines:
+    line = raw.strip()
+    if not found and line and not line.startswith('#') and '=' in raw:
+        key, _ = raw.split('=', 1)
+        if key.strip() == 'wait.strategy':
+            updated.append(f'wait.strategy={target_value}')
+            found = True
+            continue
+    updated.append(raw)
+if not found:
+    if updated and updated[-1] != '':
+        updated.append('')
+    updated.append(f'wait.strategy={target_value}')
 path.write_text('\n'.join(updated) + '\n')
 PY
 }
@@ -250,6 +298,7 @@ label=${1}
 rate=${BENCHMARK_RATE}
 duration_sec=${BENCHMARK_DURATION_SEC}
 web_port=${BENCHMARK_WEB_PORT}
+wait_strategy=${BENCHMARK_WAIT_STRATEGY}
 config_file=${BENCHMARK_CONFIG_FILE}
 compose_file=${FIX_DEMO_COMPOSE_FILE}
 compose_override_file=${RUNTIME_PROFILE_COMPOSE_OVERRIDE_FILE}
@@ -346,17 +395,20 @@ print_benchmark_docker_stats() {
 
 prepare_benchmark_mode() {
     local current_mode
+    local current_wait_strategy
     current_mode="$(current_benchmark_mode_value)"
-    if [[ "${current_mode}" == "true" ]]; then
-        info "benchmark.mode.enabled is already true in ${BENCHMARK_CONFIG_FILE}"
+    current_wait_strategy="$(current_wait_strategy_value)"
+    if [[ "${current_mode}" == "true" && "${current_wait_strategy^^}" == "${BENCHMARK_WAIT_STRATEGY^^}" ]]; then
+        info "Benchmark config already active in ${BENCHMARK_CONFIG_FILE} (benchmark.mode.enabled=true, wait.strategy=${current_wait_strategy})"
         return 0
     fi
 
     BENCHMARK_CONFIG_BACKUP_FILE="$(mktemp /tmp/llex-simulator.properties.benchmark.XXXXXX)"
     cp "${BENCHMARK_CONFIG_FILE}" "${BENCHMARK_CONFIG_BACKUP_FILE}"
     set_benchmark_mode_value true
+    set_wait_strategy_value "${BENCHMARK_WAIT_STRATEGY}"
     BENCHMARK_CONFIG_CHANGED=true
-    info "Temporarily enabled benchmark.mode.enabled=true in ${BENCHMARK_CONFIG_FILE}"
+    info "Temporarily enabled benchmark.mode.enabled=true and wait.strategy=${BENCHMARK_WAIT_STRATEGY} in ${BENCHMARK_CONFIG_FILE}"
 }
 
 restore_benchmark_mode_if_needed() {

@@ -1,6 +1,7 @@
 package com.llexsimulator.disruptor.handler;
 
 import com.llexsimulator.disruptor.OrderEvent;
+import com.llexsimulator.disruptor.OrderRequestType;
 import com.llexsimulator.engine.FixConnection;
 import com.llexsimulator.engine.FixOutboundSender;
 import com.llexsimulator.engine.OrderSessionRegistry;
@@ -49,6 +50,25 @@ public final class ExecutionReportHandler implements EventHandler<OrderEvent> {
     @Override
     public void onEvent(OrderEvent event, long sequence, boolean endOfBatch) {
         FillBehaviorType behavior = event.fillInstructionDecoder.fillBehavior();
+
+        if (event.requestType == OrderRequestType.CANCEL) {
+            if (behavior == FillBehaviorType.REJECT || event.referencedCorrelationId == 0L) {
+                sendSync(event, behavior);
+            } else {
+                sendCancelForReferencedOrder(event, event.clOrdIdBytes);
+            }
+            return;
+        }
+
+        if (event.requestType == OrderRequestType.AMEND) {
+            if (behavior == FillBehaviorType.REJECT || event.referencedCorrelationId == 0L) {
+                sendSync(event, behavior);
+                return;
+            }
+
+            sendCancelForReferencedOrder(event, event.origClOrdIdBytes);
+        }
+
         long delayNs = event.fillInstructionDecoder.delayNs();
 
         if (delayNs > 0) {
@@ -78,6 +98,24 @@ public final class ExecutionReportHandler implements EventHandler<OrderEvent> {
         } else {
             sendSync(event, behavior);
         }
+    }
+
+    private void sendCancelForReferencedOrder(OrderEvent event, byte[] reportClOrdId) {
+        OrderState referencedState = orderRepository.get(event.referencedCorrelationId);
+        if (referencedState == null) {
+            log.warn("No referenced order for correlationId={} requestType={}", event.referencedCorrelationId, event.requestType);
+            return;
+        }
+
+        referencedState.getSymbol(event.symbolBytes, 0);
+        sendCancel(event.referencedCorrelationId,
+                referencedState.getSessionConnectionId(),
+                reportClOrdId,
+                event.symbolBytes,
+                mapSide(referencedState.getSide()),
+                referencedState.getOrderQty(),
+                referencedState.getPrice(),
+                referencedState.getCumQty());
     }
 
     private void sendSync(OrderEvent event, FillBehaviorType behavior) {
@@ -323,5 +361,13 @@ public final class ExecutionReportHandler implements EventHandler<OrderEvent> {
     private static final class SendContext {
         private final byte[] orderIdBytes = new byte[36];
         private final byte[] execIdBytes = new byte[36];
+    }
+
+    private static com.llexsimulator.sbe.OrderSide mapSide(byte sideValue) {
+        return switch (sideValue) {
+            case 2 -> com.llexsimulator.sbe.OrderSide.SELL;
+            case 5 -> com.llexsimulator.sbe.OrderSide.SELL_SHORT;
+            default -> com.llexsimulator.sbe.OrderSide.BUY;
+        };
     }
 }

@@ -37,6 +37,7 @@ public final class OrderEvent {
 
     // ── Scratch byte arrays for zero-GC ID copying (SBE uses byte[]) ─────────
     public final byte[] clOrdIdBytes  = new byte[36];
+    public final byte[] origClOrdIdBytes = new byte[36];
     public final byte[] orderIdBytes  = new byte[36];
     public final byte[] execIdBytes   = new byte[36];
     public final byte[] symbolBytes   = new byte[16];
@@ -47,6 +48,8 @@ public final class OrderEvent {
     public long    correlationId;
     public long    sessionConnectionId;
     public long    arrivalTimeNs;
+    public long    referencedCorrelationId;
+    public OrderRequestType requestType = OrderRequestType.NEW;
     public boolean isValid;
 
     /** Default constructor — flyweights start unbound; they are wrapped per event. */
