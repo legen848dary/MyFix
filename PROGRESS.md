@@ -9,12 +9,19 @@ A new session should read this file first, then continue from the **Immediate ne
 
 ## Current overall status
 
-- Session checkpoint (2026-03-23): the pending simulator coverage work remains in the working tree and the client polish requested by the user has now been implemented and verified.
+- Session checkpoint (2026-03-23): the simulator live-metrics percentile rename is now fully implemented, coverage has been restored, and the root build is green again.
 - Landed client polish in `TheFixClient`:
   - `/home` remains canonical for the order-entry page while `/neworder` is also supported end-to-end as a clean route alias.
   - `My Orders` has a stable vertical scrollbar/scrollable panel layout.
   - Topbar `Theme` and `Refresh every` controls now behave like `Menu`: clicking anywhere in the control opens the dropdown.
   - Added a new `HSBC Dark` theme with dark HSBC-red primary/success/tab-active styling.
+- Landed simulator/browser live-metrics percentile update:
+  - simulator WebSocket payload now publishes `p50Us`, `p75Us`, `p90Us`
+  - simulator UI now charts `p50 / p75 / p90`
+  - cache-busting version was bumped so browsers pick up the new assets
+- Restored `TheFixSimulator` strict 100% JaCoCo gate with focused regression coverage:
+  - added `MetricsSubscriberTest` for the updated live metrics JSON path
+  - extended `OrderDomainCoverageTest` to cover the final `ClOrdId` segment packing path still included by the strict bundle gate
 - The `Latest verified green state` section below has been refreshed to reflect the most recent validation run.
 - Repository is a Gradle multi-module project:
   - `TheFixClient`
@@ -32,6 +39,9 @@ A new session should read this file first, then continue from the **Immediate ne
 Verified on: 2026-03-23
 
 - Root build green via `./gradlew --no-daemon build`
+- Fresh simulator strict coverage gate green via `./gradlew --no-daemon :TheFixSimulator:cleanTest :TheFixSimulator:test :TheFixSimulator:jacocoTestCoverageVerification --rerun-tasks`
+- Focused simulator live-metrics regression green via `./gradlew --no-daemon :TheFixSimulator:test --tests com.llexsimulator.aeron.MetricsSubscriberTest`
+- Focused simulator order-domain regression green via `./gradlew --no-daemon :TheFixSimulator:test --tests com.llexsimulator.order.OrderDomainCoverageTest`
 - `TheFixClient` test suite green via `./gradlew --no-daemon :TheFixClient:test --rerun-tasks`
 - Focused client route/web-asset validation green via `./gradlew --no-daemon :TheFixClient:test --tests com.insoftu.thefix.client.TheFixClientServerRoutingTest`
 - Direct client run green via `./gradlew --no-daemon :TheFixClient:run` plus:
@@ -344,7 +354,7 @@ User requested:
 2. Keep the terminal demo FIX client available as an explicit opt-in workflow only
 3. Consider adding optional combined-stack support for the terminal demo FIX client when explicitly requested
 4. Use `LATENCY_BASELINE.md` as the source of truth for the last good p90-under-target commit during future optimization passes
-5. On the next chat, treat this tracker refresh as documentation-only and rerun any verification commands that are needed before making or committing further changes
+5. On the next chat, start from this now-green checkpoint and rerun any verification commands needed before making further changes
 
 ## If a new chat session resumes from here
 

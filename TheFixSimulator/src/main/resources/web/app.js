@@ -54,7 +54,7 @@ createApp({
       <div class="col-span-12 bg-dark-800 rounded-xl border border-dark-600 px-5 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h2 class="font-semibold text-white text-sm">Metrics Dashboard</h2>
-          <p class="text-xs text-slate-400 mt-1">Control how often throughput, latency, fill rate, reject rate, and the p99 chart refresh on screen.</p>
+          <p class="text-xs text-slate-400 mt-1">Control how often throughput, latency, fill rate, reject rate, and the percentile chart refresh on screen.</p>
         </div>
         <div class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
           <div class="flex items-center gap-3">
@@ -85,18 +85,18 @@ createApp({
           <p class="text-xs text-slate-500">orders/sec</p>
         </div>
         <div class="bg-dark-800 rounded-xl p-4 border border-dark-600">
-          <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">p80 Latency</p>
-          <p class="text-2xl font-bold font-mono text-brand-500">{{ metrics.p80Us.toLocaleString() }}</p>
+          <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">p50 Latency</p>
+          <p class="text-2xl font-bold font-mono text-brand-500">{{ metrics.p50Us.toLocaleString() }}</p>
+          <p class="text-xs text-slate-500">µs · rolling window</p>
+        </div>
+        <div class="bg-dark-800 rounded-xl p-4 border border-dark-600">
+          <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">p75 Latency</p>
+          <p class="text-2xl font-bold font-mono text-emerald-400">{{ metrics.p75Us.toLocaleString() }}</p>
           <p class="text-xs text-slate-500">µs · rolling window</p>
         </div>
         <div class="bg-dark-800 rounded-xl p-4 border border-dark-600">
           <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">p90 Latency</p>
-          <p class="text-2xl font-bold font-mono text-yellow-400">{{ metrics.p90Us.toLocaleString() }}</p>
-          <p class="text-xs text-slate-500">µs · rolling window</p>
-        </div>
-        <div class="bg-dark-800 rounded-xl p-4 border border-dark-600">
-          <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">p99 Latency</p>
-          <p class="text-2xl font-bold font-mono" :class="metrics.p99Us < 500 ? 'text-yellow-400' : 'text-red-400'">{{ metrics.p99Us.toLocaleString() }}</p>
+          <p class="text-2xl font-bold font-mono" :class="metrics.p90Us < 100 ? 'text-yellow-400' : 'text-red-400'">{{ metrics.p90Us.toLocaleString() }}</p>
           <p class="text-xs text-slate-500">µs · rolling window</p>
         </div>
       </div>
@@ -240,7 +240,7 @@ createApp({
           <div class="flex items-center justify-between mb-4">
             <div>
               <h2 class="font-semibold text-white text-sm">Latency Percentiles — History</h2>
-              <p class="text-xs text-slate-500 mt-1">p80 · p90 · p99 · rolling window · last 60 refreshes</p>
+              <p class="text-xs text-slate-500 mt-1">p50 · p75 · p90 · rolling window · last 60 refreshes</p>
             </div>
             <span class="text-xs text-slate-400 font-mono">{{ selectedRefreshSeconds }}s cadence</span>
           </div>
@@ -306,7 +306,7 @@ createApp({
     const orders         = ref([])
 
     const metrics = reactive({
-      throughputPerSec: 0, p80Us: 0, p90Us: 0, p99Us: 0,
+      throughputPerSec: 0, p50Us: 0, p75Us: 0, p90Us: 0,
       fills: 0, rejects: 0, cancels: 0, execReports: 0, orders: 0
     })
 
@@ -317,7 +317,7 @@ createApp({
 
     const latencyChart = ref(null)
     let   chart        = null
-    const latencyHistory = { labels: [], p80: [], p90: [], p99: [] }
+    const latencyHistory = { labels: [], p50: [], p75: [], p90: [] }
     let metricsRefreshTimer = null
     let pollTimer = null
     let latestMetricsSnapshot = null
@@ -366,9 +366,9 @@ createApp({
       if (!m) return
 
       metrics.throughputPerSec = m.throughputPerSec
-      metrics.p80Us       = m.p80Us       ?? 0
+      metrics.p50Us       = m.p50Us       ?? 0
+      metrics.p75Us       = m.p75Us       ?? 0
       metrics.p90Us       = m.p90Us       ?? 0
-      metrics.p99Us       = m.p99Us       ?? 0
       metrics.fills       = m.fills        ?? 0
       metrics.rejects     = m.rejects      ?? 0
       metrics.cancels     = m.cancels      ?? 0
@@ -379,19 +379,19 @@ createApp({
       const now = new Date().toLocaleTimeString()
       if (latencyHistory.labels.length >= 60) {
         latencyHistory.labels.shift()
-        latencyHistory.p80.shift()
+        latencyHistory.p50.shift()
+        latencyHistory.p75.shift()
         latencyHistory.p90.shift()
-        latencyHistory.p99.shift()
       }
       latencyHistory.labels.push(now)
-      latencyHistory.p80.push(m.p80Us ?? 0)
+      latencyHistory.p50.push(m.p50Us ?? 0)
+      latencyHistory.p75.push(m.p75Us ?? 0)
       latencyHistory.p90.push(m.p90Us ?? 0)
-      latencyHistory.p99.push(m.p99Us ?? 0)
       if (chart) {
         chart.data.labels = latencyHistory.labels
-        chart.data.datasets[0].data = latencyHistory.p99
-        chart.data.datasets[1].data = latencyHistory.p90
-        chart.data.datasets[2].data = latencyHistory.p80
+        chart.data.datasets[0].data = latencyHistory.p90
+        chart.data.datasets[1].data = latencyHistory.p75
+        chart.data.datasets[2].data = latencyHistory.p50
         chart.update('none')
       }
     }
@@ -400,9 +400,9 @@ createApp({
       if (!source) return null
       return {
         throughputPerSec:  source.throughputPerSec ?? 0,
-        p80Us:             source.p80LatencyUs  ?? source.p80Us  ?? 0,
+        p50Us:             source.p50LatencyUs  ?? source.p50Us  ?? 0,
+        p75Us:             source.p75LatencyUs  ?? source.p75Us  ?? 0,
         p90Us:             source.p90LatencyUs  ?? source.p90Us  ?? 0,
-        p99Us:             source.p99LatencyUs  ?? source.p99Us  ?? 0,
         fills:             source.fillsSent     ?? source.fills   ?? 0,
         rejects:           source.rejectsSent   ?? source.rejects ?? 0,
         cancels:           source.cancelsSent   ?? source.cancels ?? 0,
@@ -413,14 +413,14 @@ createApp({
 
     function clearLatencyChart() {
       latencyHistory.labels.length = 0
-      latencyHistory.p80.length = 0
+      latencyHistory.p50.length = 0
+      latencyHistory.p75.length = 0
       latencyHistory.p90.length = 0
-      latencyHistory.p99.length = 0
       if (chart) {
         chart.data.labels = latencyHistory.labels
-        chart.data.datasets[0].data = latencyHistory.p99
-        chart.data.datasets[1].data = latencyHistory.p90
-        chart.data.datasets[2].data = latencyHistory.p80
+        chart.data.datasets[0].data = latencyHistory.p90
+        chart.data.datasets[1].data = latencyHistory.p75
+        chart.data.datasets[2].data = latencyHistory.p50
         chart.update('none')
       }
     }
@@ -571,20 +571,20 @@ createApp({
             labels: latencyHistory.labels,
             datasets: [
               {
-                label: 'p99',
-                data: latencyHistory.p99,
-                borderColor: '#ef4444', backgroundColor: '#ef444418',
-                borderWidth: 2, pointRadius: 0, fill: false, tension: 0.3
-              },
-              {
                 label: 'p90',
                 data: latencyHistory.p90,
                 borderColor: '#f59e0b', backgroundColor: '#f59e0b18',
+                borderWidth: 2, pointRadius: 0, fill: false, tension: 0.3
+              },
+              {
+                label: 'p75',
+                data: latencyHistory.p75,
+                borderColor: '#10b981', backgroundColor: '#10b98118',
                 borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0.3
               },
               {
-                label: 'p80',
-                data: latencyHistory.p80,
+                label: 'p50',
+                data: latencyHistory.p50,
                 borderColor: '#22c55e', backgroundColor: '#22c55e18',
                 borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0.3
               }

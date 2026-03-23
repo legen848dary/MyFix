@@ -2,6 +2,12 @@ package com.llexsimulator.order;
 
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
@@ -177,6 +183,224 @@ class OrderDomainCoverageTest {
         repository.indexClOrdId(9_999L, ascii36("FINAL-CL-9999"), 36);
 
         assertSame(finalState, repository.findByClOrdId(ascii36("FINAL-CL-9999"), 36));
+    }
+
+    @Test
+    void orderRepositoryClOrdIdIndexHandlesBlankIdsDuplicateKeysAndCollisionCompaction() {
+        OrderRepository repository = new OrderRepository(4);
+
+        OrderState blankState = repository.claim(1L);
+        assertNotNull(blankState);
+        repository.indexClOrdId(1L, new byte[36], 36);
+        assertNull(repository.findByClOrdId(new byte[36], 36));
+        repository.release(1L);
+
+        List<String> collidingIds = findCollidingClOrdIds(2);
+        String firstCollision = collidingIds.get(0);
+        String secondCollision = collidingIds.get(1);
+
+        OrderState first = repository.claim(101L);
+        assertNotNull(first);
+        first.setCorrelationId(101L);
+        first.setClOrdId(ascii36(firstCollision), 0, 36);
+        repository.indexClOrdId(101L, ascii36(firstCollision), 36);
+
+        OrderState second = repository.claim(102L);
+        assertNotNull(second);
+        second.setCorrelationId(102L);
+        second.setClOrdId(ascii36(secondCollision), 0, 36);
+        repository.indexClOrdId(102L, ascii36(secondCollision), 36);
+
+        assertSame(second, repository.findByClOrdId(ascii36(secondCollision), 36));
+
+        repository.release(102L);
+        assertNull(repository.findByClOrdId(ascii36(secondCollision), 36));
+
+        OrderState reinsertedSecond = repository.claim(103L);
+        assertNotNull(reinsertedSecond);
+        reinsertedSecond.setCorrelationId(103L);
+        reinsertedSecond.setClOrdId(ascii36(secondCollision), 0, 36);
+        repository.indexClOrdId(103L, ascii36(secondCollision), 36);
+
+        repository.release(101L);
+        assertNull(repository.findByClOrdId(ascii36(firstCollision), 36));
+        assertSame(reinsertedSecond, repository.findByClOrdId(ascii36(secondCollision), 36));
+
+        byte[] duplicateKey = ascii36("DUP-KEY-200");
+        OrderState originalDuplicate = repository.claim(200L);
+        assertNotNull(originalDuplicate);
+        originalDuplicate.setCorrelationId(200L);
+        originalDuplicate.setClOrdId(duplicateKey, 0, 36);
+        repository.indexClOrdId(200L, duplicateKey, 36);
+
+        OrderState replacementDuplicate = repository.claim(201L);
+        assertNotNull(replacementDuplicate);
+        replacementDuplicate.setCorrelationId(201L);
+        replacementDuplicate.setClOrdId(duplicateKey, 0, 36);
+        repository.indexClOrdId(201L, duplicateKey, 36);
+
+        assertSame(replacementDuplicate, repository.findByClOrdId(duplicateKey, 36));
+
+        repository.release(200L);
+        repository.release(201L);
+        repository.release(103L);
+
+        OrderState staleIndexed = repository.claim(300L);
+        assertNotNull(staleIndexed);
+        staleIndexed.setCorrelationId(300L);
+        staleIndexed.setClOrdId(ascii36("STALE-300"), 0, 36);
+        repository.indexClOrdId(300L, ascii36("STALE-300"), 36);
+        staleIndexed.setClOrdId(ascii36("STALE-301"), 0, 36);
+        repository.release(300L);
+    }
+
+    @Test
+    void orderRepositoryClOrdIdIndexCoversFullFinalSegmentPacking() {
+        OrderRepository repository = new OrderRepository(2);
+        byte[] fullWidthClOrdId = ascii36("ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890");
+
+        OrderState state = repository.claim(501L);
+        assertNotNull(state);
+        state.setCorrelationId(501L);
+        state.setClOrdId(fullWidthClOrdId, 0, 36);
+        repository.indexClOrdId(501L, fullWidthClOrdId, 36);
+
+        assertSame(state, repository.findByClOrdId(fullWidthClOrdId, 36));
+
+        repository.release(501L);
+
+        assertNull(repository.findByClOrdId(fullWidthClOrdId, 36));
+    }
+
+    @Test
+    void clOrdIdIndexCoversNonOccupiedProbeAndNoMoveCompactionBranches() throws Exception {
+        Constructor<?> constructor = Class.forName("com.llexsimulator.order.OrderRepository$ClOrdIdIndex")
+                .getDeclaredConstructor(int.class);
+        constructor.setAccessible(true);
+        Object index = constructor.newInstance(4);
+
+        byte[] probeKey = ascii36("REFLECT-PROBE-1");
+        int probeHomeSlot = homeSlot(probeKey, 15);
+        byte[] slotState = (byte[]) getField(index, "slotState");
+        slotState[probeHomeSlot] = 2;
+
+        Method getMethod = index.getClass().getDeclaredMethod("get", byte[].class, int.class);
+        getMethod.setAccessible(true);
+        assertEquals(Long.MIN_VALUE, getMethod.invoke(index, probeKey, 36));
+
+        byte[] compactKey = ascii36("REFLECT-COMPACT-1");
+        int compactHomeSlot = homeSlot(compactKey, 15);
+        if (compactHomeSlot != 1) {
+            compactKey = firstCandidateForHomeSlot(1);
+        }
+
+        writeSlot(index, 1, compactKey, 401L);
+
+        Method compactFrom = index.getClass().getDeclaredMethod("compactFrom", int.class);
+        compactFrom.setAccessible(true);
+        compactFrom.invoke(index, 0);
+
+        slotState = (byte[]) getField(index, "slotState");
+        assertEquals(0, slotState[0]);
+        assertEquals(1, slotState[1]);
+        assertEquals(401L, ((long[]) getField(index, "correlationIds"))[1]);
+    }
+
+    private static byte[] firstCandidateForHomeSlot(int targetHomeSlot) {
+        for (int i = 0; i < 10_000; i++) {
+            byte[] candidate = ascii36("REFLECT-" + i);
+            if (homeSlot(candidate, 15) == targetHomeSlot) {
+                return candidate;
+            }
+        }
+        throw new IllegalStateException("Unable to find test candidate for target home slot " + targetHomeSlot);
+    }
+
+    private static Object getField(Object target, String name) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(target);
+    }
+
+    private static void writeSlot(Object index, int slot, byte[] clOrdId, long correlationId) throws Exception {
+        int effectiveLength = effectiveLength(clOrdId, 36);
+        ((byte[]) getField(index, "slotState"))[slot] = 1;
+        ((long[]) getField(index, "segment0"))[slot] = packLong(clOrdId, effectiveLength, 0);
+        ((long[]) getField(index, "segment1"))[slot] = packLong(clOrdId, effectiveLength, 8);
+        ((long[]) getField(index, "segment2"))[slot] = packLong(clOrdId, effectiveLength, 16);
+        ((long[]) getField(index, "segment3"))[slot] = packLong(clOrdId, effectiveLength, 24);
+        ((int[]) getField(index, "segment4"))[slot] = packInt(clOrdId, effectiveLength, 32);
+        ((long[]) getField(index, "correlationIds"))[slot] = correlationId;
+    }
+
+    private static List<String> findCollidingClOrdIds(int needed) {
+        Map<Integer, List<String>> byHomeSlot = new HashMap<>();
+        for (int i = 0; i < 10_000; i++) {
+            String candidate = "COLLIDE-" + i;
+            int homeSlot = homeSlot(ascii36(candidate), 15);
+            List<String> bucket = byHomeSlot.computeIfAbsent(homeSlot, ignored -> new java.util.ArrayList<>());
+            bucket.add(candidate);
+            if (bucket.size() >= needed) {
+                return bucket;
+            }
+        }
+        throw new IllegalStateException("Unable to find enough colliding ClOrdIds for test coverage");
+    }
+
+    private static int homeSlot(byte[] bytes, int mask) {
+        int effectiveLength = effectiveLength(bytes, 36);
+        long s0 = packLong(bytes, effectiveLength, 0);
+        long s1 = packLong(bytes, effectiveLength, 8);
+        long s2 = packLong(bytes, effectiveLength, 16);
+        long s3 = packLong(bytes, effectiveLength, 24);
+        int s4 = packInt(bytes, effectiveLength, 32);
+        return mix(s0, s1, s2, s3, s4) & mask;
+    }
+
+    private static int effectiveLength(byte[] bytes, int length) {
+        int safeLength = Math.max(0, Math.min(length, bytes.length));
+        while (safeLength > 0) {
+            byte value = bytes[safeLength - 1];
+            if (value != 0 && value != ' ') {
+                break;
+            }
+            safeLength--;
+        }
+        return safeLength;
+    }
+
+    private static long packLong(byte[] bytes, int effectiveLength, int segmentOffset) {
+        long packed = 0L;
+        for (int i = 0; i < 8; i++) {
+            packed <<= 8;
+            int index = segmentOffset + i;
+            if (index < effectiveLength) {
+                packed |= bytes[index] & 0xFFL;
+            }
+        }
+        return packed;
+    }
+
+    private static int packInt(byte[] bytes, int effectiveLength, int segmentOffset) {
+        int packed = 0;
+        for (int i = 0; i < 4; i++) {
+            packed <<= 8;
+            int index = segmentOffset + i;
+            if (index < effectiveLength) {
+                packed |= bytes[index] & 0xFF;
+            }
+        }
+        return packed;
+    }
+
+    private static int mix(long s0, long s1, long s2, long s3, int s4) {
+        long hash = 0x9E3779B97F4A7C15L;
+        hash ^= s0 + 0x9E3779B97F4A7C15L + (hash << 6) + (hash >>> 2);
+        hash ^= s1 + 0x9E3779B97F4A7C15L + (hash << 6) + (hash >>> 2);
+        hash ^= s2 + 0x9E3779B97F4A7C15L + (hash << 6) + (hash >>> 2);
+        hash ^= s3 + 0x9E3779B97F4A7C15L + (hash << 6) + (hash >>> 2);
+        hash ^= (s4 & 0xFFFFFFFFL) + 0x9E3779B97F4A7C15L + (hash << 6) + (hash >>> 2);
+        return (int) (hash ^ (hash >>> 32));
     }
 }
 

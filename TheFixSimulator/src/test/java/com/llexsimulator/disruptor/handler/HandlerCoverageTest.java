@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import uk.co.real_logic.artio.session.Session;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -309,6 +310,39 @@ class HandlerCoverageTest {
     }
 
     @Test
+    void metricsPublishHandlerCapturesBenchmarkSnapshotsAndStageLatencyBreakdown() throws Exception {
+        MetricsRegistry registry = new MetricsRegistry();
+        MetricsPublisher publisher = mock(MetricsPublisher.class);
+        MetricsPublishHandler handler = new MetricsPublishHandler(registry, publisher, 16, false);
+        forceLastBenchmarkSnapshotNs(handler, 0L);
+
+        OrderEvent event = newLimitOrderEvent(75L, 1L, OrderSide.BUY, 10_000L, 1_200_000_000L);
+        writeFillInstruction(event, FillBehaviorType.IMMEDIATE_FULL_FILL, 10_000, 1, 0L, 1_200_000_000L, RejectReason.SIMULATOR_REJECT);
+
+        long now = System.nanoTime();
+        event.arrivalTimeNs = now - 1_000_000L;
+        event.publishCompleteNs = event.arrivalTimeNs + 100_000L;
+        event.validationStartNs = event.publishCompleteNs + 10_000L;
+        event.validationEndNs = event.validationStartNs + 20_000L;
+        event.fillStrategyEndNs = event.validationEndNs + 30_000L;
+        event.executionReportEndNs = event.fillStrategyEndNs + 40_000L;
+
+        handler.onEvent(event, 0L, true);
+
+        verify(publisher, never()).publish(anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), anyLong());
+
+        registry.snapshot();
+
+        assertTrue(registry.getPreValidationQueueP50Ns() > 0L);
+        assertTrue(registry.getIngressPublishP50Ns() > 0L);
+        assertTrue(registry.getDisruptorQueueP50Ns() > 0L);
+        assertTrue(registry.getValidationP50Ns() > 0L);
+        assertTrue(registry.getFillStrategyP50Ns() > 0L);
+        assertTrue(registry.getExecutionReportP50Ns() > 0L);
+        assertTrue(registry.getMetricsPublishP50Ns() > 0L);
+    }
+
+    @Test
     void executionReportHandlerProcessesCancelAndAmendRequests() {
         OrderSessionRegistry registry = mock(OrderSessionRegistry.class);
         FixOutboundSender outboundSender = mock(FixOutboundSender.class);
@@ -422,6 +456,12 @@ class HandlerCoverageTest {
         state.setClOrdId(ascii36(clOrdId), 0, 36);
         state.setSymbol(ascii16(symbol), 0, 16);
         repository.indexClOrdId(correlationId, ascii36(clOrdId), 36);
+    }
+
+    private static void forceLastBenchmarkSnapshotNs(MetricsPublishHandler handler, long value) throws Exception {
+        Field field = MetricsPublishHandler.class.getDeclaredField("lastBenchmarkSnapshotNs");
+        field.setAccessible(true);
+        field.setLong(handler, value);
     }
 }
 

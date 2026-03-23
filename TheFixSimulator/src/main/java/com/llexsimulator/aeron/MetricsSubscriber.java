@@ -63,9 +63,9 @@ public final class MetricsSubscriber implements Runnable {
                .append(",\"fills\":").append(snapshotDecoder.fillsCount())
                .append(",\"rejects\":").append(snapshotDecoder.rejectsCount())
                .append(",\"cancels\":").append(metricsRegistry.getCancelsSent())
-               .append(",\"p80Us\":").append(metricsRegistry.getP80Ns() / 1000)
+               .append(",\"p50Us\":").append(metricsRegistry.getP50Ns() / 1000)
+               .append(",\"p75Us\":").append(metricsRegistry.getP75Ns() / 1000)
                .append(",\"p90Us\":").append(metricsRegistry.getP90Ns() / 1000)
-               .append(",\"p99Us\":").append(metricsRegistry.getP99Ns() / 1000)
                .append(",\"throughputPerSec\":").append(snapshotDecoder.throughputPerSec())
                .append("}");
 

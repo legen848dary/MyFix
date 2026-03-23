@@ -41,6 +41,8 @@ application {
 
 tasks.test {
     useJUnitPlatform()
+    minHeapSize = "512m"
+    maxHeapSize = "2g"
     jvmArgs(
         "--add-exports", "java.base/jdk.internal.misc=ALL-UNNAMED",
         "--add-opens", "java.base/sun.nio.ch=ALL-UNNAMED",
