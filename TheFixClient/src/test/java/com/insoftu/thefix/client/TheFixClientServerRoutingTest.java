@@ -55,6 +55,7 @@ class TheFixClientServerRoutingTest {
             assertTrue(response.body().contains("<base href=\"/\"/>"), "Expected base href for " + path);
             assertTrue(response.body().contains("app.js?v="), "Expected app.js reference for " + path);
             assertTrue(response.body().contains("overflow-y: auto;"), "Expected orders blotter vertical scroll styling in shell for " + path);
+            assertTrue(response.body().contains("z-index: 70;"), "Expected elevated menu dropdown layering in shell for " + path);
         }
 
         HttpResponse<String> appJsFromAsset = send(client, "/app.js");
@@ -69,6 +70,9 @@ class TheFixClientServerRoutingTest {
         assertTrue(appJsFromAsset.body().contains("READY_PENDING_CONNECTION"));
         assertTrue(appJsFromAsset.body().contains("reconcileSessionActionPending"));
         assertTrue(appJsFromAsset.body().contains("shouldKeepConnectPending"));
+        assertTrue(appJsFromAsset.body().contains("syncFieldValuesToRawFixDraft"));
+        assertTrue(appJsFromAsset.body().contains("parseRawFixInputByDelimiter"));
+        assertTrue(appJsFromAsset.body().contains("rawFixInputDraft"));
 
         HttpResponse<String> apiHealth = send(client, "/api/health");
         assertEquals(200, apiHealth.statusCode());

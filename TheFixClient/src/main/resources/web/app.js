@@ -82,6 +82,48 @@ function loadRefreshFrequencyMap() {
   }
 }
 
+const FIX_TAG_LABELS = Object.freeze({
+  '8': 'BeginString',
+  '11': 'ClOrdID',
+  '15': 'Currency',
+  '21': 'HandlInst',
+  '35': 'MsgType',
+  '38': 'OrderQty',
+  '40': 'OrdType',
+  '41': 'OrigClOrdID',
+  '44': 'Price',
+  '49': 'SenderCompID',
+  '54': 'Side',
+  '55': 'Symbol',
+  '56': 'TargetCompID',
+  '58': 'Text',
+  '59': 'TimeInForce',
+  '60': 'TransactTime',
+  '98': 'EncryptMethod',
+  '99': 'StopPx',
+  '108': 'HeartBtInt',
+  '141': 'ResetSeqNumFlag',
+  '207': 'SecurityExchange',
+  '423': 'PriceType'
+})
+
+const SIDE_TO_FIX = Object.freeze({ BUY: '1', SELL: '2', SELL_SHORT: '5' })
+const FIX_TO_SIDE = Object.freeze({ '1': 'BUY', '2': 'SELL', '5': 'SELL_SHORT' })
+const ORDER_TYPE_TO_FIX = Object.freeze({
+  MARKET: '1',
+  LIMIT: '2',
+  STOP: '3',
+  STOP_LIMIT: '4',
+  MARKET_ON_CLOSE: '5',
+  LIMIT_ON_CLOSE: 'B',
+  PEGGED: 'P'
+})
+const FIX_TO_ORDER_TYPE = Object.freeze(Object.fromEntries(Object.entries(ORDER_TYPE_TO_FIX).map(([key, value]) => [value, key])))
+const TIF_TO_FIX = Object.freeze({ DAY: '0', GTC: '1', OPG: '2', IOC: '3', FOK: '4', GTD: '6' })
+const FIX_TO_TIF = Object.freeze(Object.fromEntries(Object.entries(TIF_TO_FIX).map(([key, value]) => [value, key])))
+const PRICE_TYPE_TO_FIX = Object.freeze({ PER_UNIT: '1', PERCENTAGE: '2', FIXED_AMOUNT: '3', YIELD: '9', SPREAD: '6' })
+const FIX_TO_PRICE_TYPE = Object.freeze(Object.fromEntries(Object.entries(PRICE_TYPE_TO_FIX).map(([key, value]) => [value, key])))
+
 createApp({
   template: `
     <div class="shell">
@@ -203,7 +245,15 @@ createApp({
                 <h2 class="panel__title">Create FIX message</h2>
                 <p class="panel__copy">Build live FIX messages with version-aware tags, custom FIDs, and bulk NOS routing from one operator surface.</p>
               </div>
-              <span class="chip">{{ previewStatusLabel }}</span>
+                  <div class="chip-row panel-header__actions">
+                <button
+                  v-if="activeMode === 'single'"
+                  class="button button--soft"
+                  @click="toggleSingleMessageViewMode">
+                  {{ singleMessageViewMode === 'fields' ? 'Switch to Raw FIX view' : 'Switch to Field view' }}
+                </button>
+                <span class="chip">{{ previewStatusLabel }}</span>
+              </div>
             </div>
 
             <div class="workflow-toolbar">
@@ -244,7 +294,40 @@ createApp({
             </div>
 
             <div class="panel__body">
-              <div class="order-grid order-grid--comfortable order-grid--trade-ticket">
+              <div v-if="activeMode === 'single' && singleMessageViewMode === 'raw'" class="single-message-workspace">
+                <div class="single-message-workspace__topbar">
+                  <div>
+                    <p class="eyebrow">Single Message</p>
+                    <p class="single-message-workspace__copy">Raw FIX message view with custom delimiter parsing.</p>
+                  </div>
+                  <div class="single-message-workspace__actions">
+                    <label class="field field--inline field--delimiter-input">
+                      <span class="field__label">Delimiter</span>
+                      <input v-model="rawFixDelimiter" placeholder="| or SOH" />
+                    </label>
+                    <button class="button button--soft" @click="parseRawFixInputByDelimiter">Parse Raw fix by deliminator</button>
+                  </div>
+                </div>
+
+                <div class="field">
+                  <span class="field__label">Raw FIX input</span>
+                  <textarea
+                    v-model="rawFixInputDraft"
+                    class="raw-fix-input"
+                    placeholder="Paste a FIX message using the delimiter above, then parse it into the raw message view or switch to the field view."></textarea>
+                  <span class="field__hint">Supports literal delimiters plus aliases such as <span class="mono">SOH</span>, <span class="mono">^A</span>, <span class="mono">\u0001</span>, or any custom separator.</span>
+                </div>
+
+                <div v-if="rawFixParseNotice" class="chip-row">
+                  <span class="chip">{{ rawFixParseNotice }}</span>
+                </div>
+
+                <ul v-if="rawFixParseWarnings.length" class="warning-list">
+                  <li v-for="warning in rawFixParseWarnings" :key="warning">{{ warning }}</li>
+                </ul>
+              </div>
+
+              <div v-if="activeMode === 'single' && singleMessageViewMode === 'fields'" class="order-grid order-grid--comfortable order-grid--trade-ticket">
                 <div class="field field--trade-ticket">
                   <span class="field__label">Message type</span>
                   <select v-model="orderDraft.messageType">
@@ -329,7 +412,17 @@ createApp({
                 </div>
               </div>
 
-              <div v-if="orderDraft.additionalTags.length" class="stack" style="margin-top: 18px; gap: 12px;">
+              <div v-else-if="activeMode === 'single' && singleMessageViewMode === 'raw'" class="raw-message-view">
+                <div class="raw-message-view__panel">
+                  <div class="raw-message-view__header">
+                    <p class="eyebrow">Raw FIX message</p>
+                    <span class="chip mono">{{ normalizedRawFixDelimiterLabel }}</span>
+                  </div>
+                  <pre class="raw-message-view__content">{{ formattedRawFixMessage }}</pre>
+                </div>
+              </div>
+
+              <div v-if="activeMode === 'single' && singleMessageViewMode === 'fields' && orderDraft.additionalTags.length" class="stack" style="margin-top: 18px; gap: 12px;">
                 <div v-for="(tag, index) in orderDraft.additionalTags" :key="tag.tag + '-' + index" class="order-grid order-grid--comfortable" style="align-items: end;">
                   <div class="field">
                     <span class="field__label">Tag</span>
@@ -734,6 +827,12 @@ createApp({
     const selectedSuggestedTagKey = ref('')
     const selectedTemplateId = ref('')
     const templateNameDraft = ref('')
+    const singleMessageViewMode = ref('fields')
+    const rawFixDelimiter = ref('|')
+    const rawFixInputDraft = ref('')
+    const rawFixDraft = ref('')
+    const rawFixParseNotice = ref('')
+    const rawFixParseWarnings = ref([])
     const amendModalOpen = ref(false)
     const cancelDialogOpen = ref(false)
     const cancelTarget = ref(null)
@@ -822,6 +921,9 @@ createApp({
       if (sessionActionPending.value === 'disconnect') return 'Disconnecting…'
       return session.connected ? 'Disconnect' : 'Connect'
     })
+    const normalizedRawFixDelimiter = computed(() => normalizeRawFixDelimiter(rawFixDelimiter.value))
+    const normalizedRawFixDelimiterLabel = computed(() => rawFixDelimiterDisplayLabel(normalizedRawFixDelimiter.value))
+    const formattedRawFixMessage = computed(() => formatRawFixMessageForDisplay(rawFixDraft.value, normalizedRawFixDelimiter.value))
     const execTypeBadge = (execType) => {
       const normalized = String(execType || '').trim().toUpperCase()
       if (normalized === 'FILL' || normalized === 'TRADE') {
@@ -944,6 +1046,213 @@ createApp({
         orderDraft.symbol = suggested
       }
       suggestedSymbol.value = suggested
+    }
+
+    function normalizeRawFixDelimiter(rawValue) {
+      const trimmed = String(rawValue ?? '').trim()
+      if (!trimmed) {
+        return '|'
+      }
+      const normalized = trimmed.toUpperCase()
+      if (normalized === 'SOH' || normalized === '^A' || normalized === '\\U0001' || normalized === '\\X01') {
+        return '\u0001'
+      }
+      if (normalized === '\\T' || normalized === 'TAB') {
+        return '\t'
+      }
+      if (normalized === '\\N' || normalized === 'NEWLINE') {
+        return '\n'
+      }
+      return trimmed
+    }
+
+    function rawFixDelimiterDisplayLabel(delimiter) {
+      if (delimiter === '\u0001') {
+        return 'SOH'
+      }
+      if (delimiter === '\t') {
+        return 'TAB'
+      }
+      if (delimiter === '\n') {
+        return 'NEWLINE'
+      }
+      return delimiter
+    }
+
+    function buildGeneratedRawFixFields() {
+      const fields = [
+        { tag: '8', value: session.beginString || 'FIX.4.4' },
+        { tag: '35', value: selectedMessageType.value?.msgType || 'D' },
+        { tag: '49', value: session.senderCompId || settingsDraft.senderCompId || 'THEFIX_TRDR01' },
+        { tag: '56', value: session.targetCompId || settingsDraft.targetCompId || 'LLEXSIM' }
+      ]
+
+      if (orderDraft.clOrdId) {
+        fields.push({ tag: '11', value: orderDraft.clOrdId })
+      }
+      if (selectedMessageType.value?.requiresOrigClOrdId && orderDraft.origClOrdId) {
+        fields.push({ tag: '41', value: orderDraft.origClOrdId })
+      }
+
+      fields.push(
+        { tag: '55', value: orderDraft.symbol || '' },
+        { tag: '54', value: SIDE_TO_FIX[orderDraft.side] || orderDraft.side || '' },
+        { tag: '207', value: orderDraft.market || '' },
+        { tag: '15', value: orderDraft.currency || '' }
+      )
+
+      if (selectedMessageType.value?.code !== 'ORDER_CANCEL_REQUEST') {
+        fields.push(
+          { tag: '38', value: String(orderDraft.quantity ?? '') },
+          { tag: '40', value: ORDER_TYPE_TO_FIX[orderDraft.orderType] || orderDraft.orderType || '' },
+          { tag: '59', value: TIF_TO_FIX[orderDraft.timeInForce] || orderDraft.timeInForce || '' },
+          { tag: '423', value: PRICE_TYPE_TO_FIX[orderDraft.priceType] || orderDraft.priceType || '' }
+        )
+
+        if (needsLimitPrice.value) {
+          fields.push({ tag: '44', value: String(orderDraft.price ?? '') })
+        }
+        if (needsStopPrice.value) {
+          fields.push({ tag: '99', value: String(orderDraft.stopPrice ?? '') })
+        }
+      } else if (orderDraft.quantity) {
+        fields.push({ tag: '38', value: String(orderDraft.quantity) })
+      }
+
+      ;(orderDraft.additionalTags || []).forEach(tag => {
+        const numericTag = String(tag?.tag ?? '').trim()
+        const value = String(tag?.value ?? '').trim()
+        if (numericTag && value) {
+          fields.push({ tag: numericTag, value })
+        }
+      })
+
+      return fields.filter(field => String(field.value ?? '').trim() !== '')
+    }
+
+    function buildGeneratedRawFixMessage() {
+      const delimiter = normalizedRawFixDelimiter.value
+      const body = buildGeneratedRawFixFields().map(field => `${field.tag}=${field.value}`).join(delimiter)
+      return body ? `${body}${delimiter}` : ''
+    }
+
+    function parseRawFixFields(rawMessage, delimiter) {
+      if (!rawMessage) {
+        return []
+      }
+      return rawMessage
+        .split(delimiter)
+        .map(segment => segment.trim())
+        .filter(Boolean)
+        .map((segment, index) => {
+          const equalsIndex = segment.indexOf('=')
+          const tag = equalsIndex >= 0 ? segment.slice(0, equalsIndex).trim() : `segment-${index + 1}`
+          const value = equalsIndex >= 0 ? segment.slice(equalsIndex + 1) : segment
+          return {
+            index,
+            tag,
+            name: FIX_TAG_LABELS[tag] || 'Custom field',
+            value
+          }
+        })
+    }
+
+    function formatRawFixMessageForDisplay(rawMessage, delimiter) {
+      if (!rawMessage) {
+        return 'No raw FIX message available yet.'
+      }
+      const visibleDelimiter = delimiter === '\u0001' ? '<SOH>' : rawFixDelimiterDisplayLabel(delimiter)
+      return rawMessage
+        .split(delimiter)
+        .map(segment => segment.trim())
+        .filter(Boolean)
+        .map(segment => `${segment}${visibleDelimiter}`)
+        .join('\n')
+    }
+
+    function applyParsedRawFixToDraft(parsedFields) {
+      const fieldMap = new Map(parsedFields.map(field => [field.tag, field.value]))
+      const messageTypeByFix = Object.fromEntries((messageTypes.value || []).map(item => [item.msgType, item.code]))
+      const nextMessageType = messageTypeByFix[fieldMap.get('35')] || orderDraft.messageType
+      const parsedMarket = fieldMap.get('207') || orderDraft.market
+      const parsedMarketDefinition = (referenceData.markets || []).find(item => item.code === parsedMarket)
+      orderDraft.messageType = nextMessageType
+      orderDraft.clOrdId = fieldMap.get('11') || ''
+      orderDraft.origClOrdId = fieldMap.get('41') || ''
+      orderDraft.symbol = fieldMap.get('55') || orderDraft.symbol
+      orderDraft.side = FIX_TO_SIDE[fieldMap.get('54')] || orderDraft.side
+      orderDraft.region = parsedMarketDefinition?.region || orderDraft.region
+      orderDraft.market = parsedMarket
+      orderDraft.currency = (fieldMap.get('15') || parsedMarketDefinition?.currency || orderDraft.currency || '').toUpperCase()
+
+      const parsedQty = Number(fieldMap.get('38'))
+      if (Number.isFinite(parsedQty) && parsedQty >= 0) {
+        orderDraft.quantity = parsedQty
+      }
+
+      const parsedPrice = Number(fieldMap.get('44'))
+      if (Number.isFinite(parsedPrice)) {
+        orderDraft.price = parsedPrice
+      }
+
+      const parsedStopPrice = Number(fieldMap.get('99'))
+      if (Number.isFinite(parsedStopPrice)) {
+        orderDraft.stopPrice = parsedStopPrice
+      }
+
+      orderDraft.orderType = FIX_TO_ORDER_TYPE[fieldMap.get('40')] || orderDraft.orderType
+      orderDraft.timeInForce = FIX_TO_TIF[fieldMap.get('59')] || orderDraft.timeInForce
+      orderDraft.priceType = FIX_TO_PRICE_TYPE[fieldMap.get('423')] || orderDraft.priceType
+
+      const coreTags = new Set(['8', '11', '15', '21', '35', '38', '40', '41', '44', '49', '54', '55', '56', '58', '59', '60', '98', '99', '108', '141', '207', '423'])
+      orderDraft.additionalTags = parsedFields
+        .filter(field => /^\d+$/.test(field.tag) && !coreTags.has(field.tag))
+        .map(field => ({ tag: Number(field.tag), name: field.name === 'Custom field' ? '' : field.name, value: field.value, custom: true }))
+    }
+
+    const syncFieldValuesToRawFixDraft = () => {
+      const generatedRawFixMessage = buildGeneratedRawFixMessage()
+      rawFixDraft.value = generatedRawFixMessage
+      rawFixInputDraft.value = generatedRawFixMessage
+      rawFixParseNotice.value = 'Loaded raw FIX content from the current field values.'
+      rawFixParseWarnings.value = []
+      return rawFixDraft.value
+    }
+
+    const parseRawFixInputByDelimiter = (applyToFields = false) => {
+      const candidateRawFix = rawFixInputDraft.value
+      const parsedFields = parseRawFixFields(candidateRawFix, normalizedRawFixDelimiter.value)
+      if (!parsedFields.length) {
+        rawFixParseWarnings.value = ['Provide a raw FIX message before parsing it.']
+        rawFixParseNotice.value = ''
+        return false
+      }
+      rawFixDraft.value = candidateRawFix
+      if (applyToFields) {
+        applyParsedRawFixToDraft(parsedFields)
+      }
+      rawFixParseWarnings.value = []
+      rawFixParseNotice.value = `Parsed ${parsedFields.length} FIX fields using delimiter ${normalizedRawFixDelimiterLabel.value}.`
+      return true
+    }
+
+    const parseRawFixMessageToFields = () => {
+      if (parseRawFixInputByDelimiter(true)) {
+        singleMessageViewMode.value = 'fields'
+      }
+    }
+
+    const toggleSingleMessageViewMode = () => {
+      const nextMode = singleMessageViewMode.value === 'fields' ? 'raw' : 'fields'
+      rawFixParseWarnings.value = []
+      if (nextMode === 'raw') {
+        syncFieldValuesToRawFixDraft()
+        singleMessageViewMode.value = 'raw'
+        return
+      }
+      if (parseRawFixInputByDelimiter(true)) {
+        singleMessageViewMode.value = 'fields'
+      }
     }
 
     const initializeDrafts = (defaults = {}) => {
@@ -1584,6 +1893,7 @@ createApp({
       apiStatus,
       activePage,
       activeMode,
+      singleMessageViewMode,
       menuOpen,
       themeMenuOpen,
       refreshMenuOpen,
@@ -1601,6 +1911,13 @@ createApp({
       preview,
       previewStatusLabel,
       previewWarnings,
+      rawFixDelimiter,
+      rawFixInputDraft,
+      rawFixDraft,
+      rawFixParseNotice,
+      rawFixParseWarnings,
+      normalizedRawFixDelimiterLabel,
+      formattedRawFixMessage,
       regions,
       sides,
       messageTypes,
@@ -1651,6 +1968,9 @@ createApp({
       addCustomTag,
       addSuggestedTag,
       removeAdditionalTag,
+      parseRawFixInputByDelimiter,
+      parseRawFixMessageToFields,
+      toggleSingleMessageViewMode,
       applySelectedTemplate,
       saveCurrentTemplate,
       openAmendModal,

@@ -9,7 +9,7 @@ GIT_BIN="${BENCHMARK_GIT:-git}"
 BASELINE_FILE="${PROJECT_ROOT}/LATENCY_BASELINE.md"
 BUILD_FIRST=false
 UPDATE_BASELINE=false
-P90_THRESHOLD_US=100
+P90_THRESHOLD_US=10
 
 die() {
   echo "$*" >&2
@@ -101,11 +101,11 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --build)
+    --build|-b)
       BUILD_FIRST=true
       shift
       ;;
-    --update-baseline)
+    --update-baseline|-u)
       UPDATE_BASELINE=true
       shift
       ;;
