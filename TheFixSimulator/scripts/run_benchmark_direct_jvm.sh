@@ -113,8 +113,17 @@ for port in "$SIM_WEB_PORT" "$FIX_PORT"; do
   fi
 done
 
+SIM_JAR="${SIM_ROOT}/build/libs/LLExSimulator-1.0-SNAPSHOT.jar"
+
 if [[ "$BUILD_FIRST" == true ]]; then
   (cd "$PROJECT_ROOT" && ./gradlew --no-daemon :TheFixSimulator:shadowJar)
+fi
+
+if [[ ! -f "$SIM_JAR" ]]; then
+  echo "Simulator JAR not found: $SIM_JAR" >&2
+  echo "Build it first with:  ./gradlew :TheFixSimulator:shadowJar" >&2
+  echo "Or re-run with the --build flag." >&2
+  exit 1
 fi
 
 cat > "${ARTIFACT_DIR}/metadata.txt" <<EOF
@@ -155,14 +164,52 @@ java \
   --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
   --add-opens=java.base/java.nio=ALL-UNNAMED \
   --add-opens=java.base/java.lang=ALL-UNNAMED \
-  -jar "${SIM_ROOT}/build/libs/LLExSimulator-1.0-SNAPSHOT.jar" \
+  -jar "$SIM_JAR" \
   > "${ARTIFACT_DIR}/simulator.log" 2>&1 &
 SIM_PID=$!
 
 python3 - <<PY
-import json, sys, time, urllib.request
-url = "http://127.0.0.1:${SIM_WEB_PORT}/api/health"
+import json, os, sys, time, urllib.request
+url      = "http://127.0.0.1:${SIM_WEB_PORT}/api/health"
+sim_pid  = ${SIM_PID}
+log_path = "${ARTIFACT_DIR}/simulator.log"
+
+def _process_alive(pid):
+    """Return True if *pid* is still running (handles zombies via /proc or ps)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists but not ours to signal
+    # The process exists; check it is not a zombie using ps (cross-platform enough)
+    try:
+        import subprocess
+        stat = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "stat="],
+            capture_output=True, text=True, timeout=2,
+        )
+        state = stat.stdout.strip()
+        return bool(state) and not state.startswith("Z")
+    except Exception:
+        return True  # assume alive if we cannot tell
+
+def _show_log_tail(path, lines=20):
+    try:
+        with open(path) as f:
+            content = f.read().strip()
+        tail = "\n".join(content.splitlines()[-lines:])
+        sys.stderr.write(f"--- last {lines} lines of {path} ---\n{tail}\n---\n")
+    except OSError:
+        sys.stderr.write(f"(could not read {path})\n")
+
 for _ in range(120):
+    if not _process_alive(sim_pid):
+        sys.stderr.write(
+            f"Simulator process (pid={sim_pid}) exited before becoming healthy.\n"
+        )
+        _show_log_tail(log_path)
+        sys.exit(1)
     try:
         with urllib.request.urlopen(url, timeout=2) as r:
             data = json.load(r)
@@ -171,7 +218,9 @@ for _ in range(120):
     except Exception:
         pass
     time.sleep(1)
-print("Timed out waiting for simulator health", file=sys.stderr)
+
+sys.stderr.write("Timed out waiting for simulator health.\n")
+_show_log_tail(log_path)
 sys.exit(1)
 PY
 
@@ -188,9 +237,44 @@ java \
 CLIENT_PID=$!
 
 python3 - <<PY
-import json, sys, time, urllib.request
-url = "http://127.0.0.1:${SIM_WEB_PORT}/api/health"
+import json, os, sys, time, urllib.request, subprocess
+url         = "http://127.0.0.1:${SIM_WEB_PORT}/api/health"
+client_pid  = ${CLIENT_PID}
+log_path    = "${ARTIFACT_DIR}/demo-client.log"
+
+def _process_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        stat = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "stat="],
+            capture_output=True, text=True, timeout=2,
+        )
+        state = stat.stdout.strip()
+        return bool(state) and not state.startswith("Z")
+    except Exception:
+        return True
+
+def _show_log_tail(path, lines=20):
+    try:
+        with open(path) as f:
+            content = f.read().strip()
+        tail = "\n".join(content.splitlines()[-lines:])
+        sys.stderr.write(f"--- last {lines} lines of {path} ---\n{tail}\n---\n")
+    except OSError:
+        sys.stderr.write(f"(could not read {path})\n")
+
 for _ in range(120):
+    if not _process_alive(client_pid):
+        sys.stderr.write(
+            f"FIX demo client process (pid={client_pid}) exited before session logon.\n"
+        )
+        _show_log_tail(log_path)
+        sys.exit(1)
     try:
         with urllib.request.urlopen(url, timeout=2) as r:
             data = json.load(r)
@@ -199,7 +283,9 @@ for _ in range(120):
     except Exception:
         pass
     time.sleep(1)
-print("Timed out waiting for FIX session logon", file=sys.stderr)
+
+sys.stderr.write("Timed out waiting for FIX session logon.\n")
+_show_log_tail(log_path)
 sys.exit(1)
 PY
 
