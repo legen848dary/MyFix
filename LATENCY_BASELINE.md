@@ -5,12 +5,12 @@ This file records the last verified commit that stayed under the latency target 
 ## Last known good baseline
 
 - Verified on: 2026-03-24
-- Commit hash: `90c9297f1a8390e9bdd3a7fb05e483162b5e7edf`
+- Commit hash: `f11136783c5dcc22dfdba3d3de30d0e99158b145`
 - Benchmark mode: direct JVM, no Docker
 - Benchmark rate: `500 msg/s`
 - p50 latency: `4 µs`
-- p90 latency: `6 µs`
-- Benchmark artifact: `TheFixSimulator/logs/direct-jvm-benchmark-reports/20260324-004235`
+- p90 latency: `5 µs`
+- Benchmark artifact: `TheFixSimulator/logs/direct-jvm-benchmark-reports/20260324-013856`
 
 ## Update rule
 
