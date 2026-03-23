@@ -15,12 +15,14 @@ const REFRESH_FREQUENCY_OPTIONS = Object.freeze([1, 3, 5])
 const PAGE_OPTIONS = [
   { code: 'order-input', label: 'Create FIX message' },
   { code: 'order-blotter', label: 'My Orders' },
+  { code: 'fix-messages', label: 'Fix Sent/Received' },
   { code: 'settings', label: 'Settings' }
 ]
 
 const PAGE_PATHS = Object.freeze({
   'order-input': '/home',
   'order-blotter': '/orders',
+  'fix-messages': '/recentfixmsgs',
   settings: '/settings'
 })
 
@@ -43,6 +45,8 @@ function pageCodeFromPath(pathname) {
     case '/orders':
     case '/blotter':
       return 'order-blotter'
+    case '/recentfixmsgs':
+      return 'fix-messages'
     case '/settings':
       return 'settings'
     default:
@@ -578,6 +582,86 @@ createApp({
         </section>
       </main>
 
+      <main v-else-if="activePage === 'fix-messages'" class="workspace workspace--single">
+        <section class="stack">
+          <article class="panel orders-panel">
+            <div class="panel__header orders-panel__header">
+              <div>
+                <h2 class="panel__title">Fix Sent/Received</h2>
+                <p class="panel__copy">Recent FIX messages captured in real time — both sent and received.</p>
+              </div>
+              <span class="orders-panel__count mono">{{ fixMsgTotal }} total</span>
+            </div>
+            <div class="fix-messages-toolbar">
+              <div class="fix-messages-toolbar__controls">
+                <label class="fix-messages-toolbar__label">
+                  <span>Page size</span>
+                  <select v-model.number="fixMsgLimit" @change="loadFixMessages" class="fix-messages-toolbar__select">
+                    <option :value="20">20</option>
+                    <option :value="50">50</option>
+                    <option :value="100">100</option>
+                  </select>
+                </label>
+                <label class="fix-messages-toolbar__label fix-messages-toolbar__label--search">
+                  <span>Filter</span>
+                  <input v-model="fixMsgSearch" placeholder="Search messages…" class="fix-messages-toolbar__input" />
+                </label>
+                <label class="fix-messages-toolbar__label">
+                  <span>Direction</span>
+                  <select v-model="fixMsgDirectionFilter" class="fix-messages-toolbar__select">
+                    <option value="">All</option>
+                    <option value="SENT">Sent</option>
+                    <option value="RECEIVED">Received</option>
+                  </select>
+                </label>
+                <label class="fix-messages-toolbar__label">
+                  <input type="checkbox" v-model="fixMsgHideHeartbeats" style="margin-right:4px" />
+                  <span>Hide heartbeats</span>
+                </label>
+              </div>
+            </div>
+            <div class="orders-table__scroll">
+              <table class="orders-table fix-messages-table">
+                <thead>
+                  <tr>
+                    <th class="text-left">Timestamp</th>
+                    <th class="text-left">Direction</th>
+                    <th class="text-left">Message Type</th>
+                    <th class="text-left">Preview</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="msg in filteredFixMessages"
+                      :key="msg.id"
+                      class="fix-messages-row"
+                      @click="openFixMsgDetail(msg)">
+                    <td class="mono fix-msg-cell">{{ msg.timestamp }}</td>
+                    <td class="fix-msg-cell">
+                      <span class="fix-msg-direction"
+                            :class="msg.direction === 'SENT' ? 'fix-msg-direction--sent' : 'fix-msg-direction--received'">
+                        {{ msg.direction }}
+                      </span>
+                    </td>
+                    <td class="mono fix-msg-cell">{{ msg.msgTypeLabel }} <span class="text-faint">({{ msg.msgType }})</span></td>
+                    <td class="mono fix-msg-preview">{{ msg.preview }}</td>
+                  </tr>
+                  <tr v-if="!filteredFixMessages.length">
+                    <td colspan="4" class="orders-table__empty">No FIX messages captured yet. Connect a session to start capturing.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="fix-messages-pagination">
+              <button class="button button--soft" :disabled="fixMsgOffset === 0" @click="fixMsgPrev">← Previous</button>
+              <span class="fix-messages-pagination__info mono">
+                {{ fixMsgOffset + 1 }}–{{ Math.min(fixMsgOffset + fixMsgLimit, fixMsgTotal) }} of {{ fixMsgTotal }}
+              </span>
+              <button class="button button--soft" :disabled="fixMsgOffset + fixMsgLimit >= fixMsgTotal" @click="fixMsgNext">Next →</button>
+            </div>
+          </article>
+        </section>
+      </main>
+
       <main v-else class="workspace workspace--single">
         <section class="stack">
           <article class="panel">
@@ -736,6 +820,21 @@ createApp({
           </div>
         </div>
       </div>
+
+      <div v-if="fixMsgDetailOpen" class="modal-backdrop" @click.self="closeFixMsgDetail">
+        <div class="modal-panel modal-panel--wide">
+          <div class="modal-panel__header">
+            <div>
+              <h3 class="modal-panel__title">FIX Message Detail</h3>
+              <p class="modal-panel__copy mono">{{ fixMsgDetail?.msgTypeLabel }} ({{ fixMsgDetail?.msgType }}) · {{ fixMsgDetail?.direction }} · {{ fixMsgDetail?.timestamp }}</p>
+            </div>
+            <button class="button button--ghost" @click="closeFixMsgDetail">Close</button>
+          </div>
+          <div class="modal-panel__body">
+            <pre class="fix-detail-raw">{{ fixMsgDetailFormatted }}</pre>
+          </div>
+        </div>
+      </div>
     </div>
   `,
 
@@ -836,6 +935,16 @@ createApp({
     const amendModalOpen = ref(false)
     const cancelDialogOpen = ref(false)
     const cancelTarget = ref(null)
+
+    const fixMessages = ref([])
+    const fixMsgTotal = ref(0)
+    const fixMsgLimit = ref(20)
+    const fixMsgOffset = ref(0)
+    const fixMsgSearch = ref('')
+    const fixMsgDirectionFilter = ref('')
+    const fixMsgHideHeartbeats = ref(false)
+    const fixMsgDetailOpen = ref(false)
+    const fixMsgDetail = ref(null)
 
     const amendDraft = reactive({
       clOrdId: '',
@@ -962,6 +1071,74 @@ createApp({
         return 'text-slate-400'
       }
       return 'text-slate-300'
+    }
+
+    const filteredFixMessages = computed(() => {
+      let items = fixMessages.value || []
+      if (fixMsgDirectionFilter.value) {
+        items = items.filter(m => m.direction === fixMsgDirectionFilter.value)
+      }
+      if (fixMsgHideHeartbeats.value) {
+        items = items.filter(m => m.msgType !== '0')
+      }
+      const query = (fixMsgSearch.value || '').trim().toLowerCase()
+      if (query) {
+        items = items.filter(m =>
+          (m.msgTypeLabel || '').toLowerCase().includes(query) ||
+          (m.msgType || '').toLowerCase().includes(query) ||
+          (m.direction || '').toLowerCase().includes(query) ||
+          (m.preview || '').toLowerCase().includes(query) ||
+          (m.timestamp || '').toLowerCase().includes(query)
+        )
+      }
+      return items
+    })
+
+    const fixMsgDetailFormatted = computed(() => {
+      if (!fixMsgDetail.value?.rawMessage) return ''
+      return fixMsgDetail.value.rawMessage
+        .split('|')
+        .filter(Boolean)
+        .map(segment => {
+          const eqIdx = segment.indexOf('=')
+          if (eqIdx >= 0) {
+            const tag = segment.slice(0, eqIdx)
+            const label = FIX_TAG_LABELS[tag] || 'Tag ' + tag
+            return segment + '  ← ' + label
+          }
+          return segment
+        })
+        .join('\n')
+    })
+
+    const loadFixMessages = async () => {
+      try {
+        const data = await apiCall('/api/fix-messages?limit=' + fixMsgLimit.value + '&offset=' + fixMsgOffset.value)
+        fixMessages.value = data.items || []
+        fixMsgTotal.value = data.total || 0
+      } catch (error) {
+        console.warn('Unable to load FIX messages', error)
+      }
+    }
+
+    const fixMsgPrev = () => {
+      fixMsgOffset.value = Math.max(0, fixMsgOffset.value - fixMsgLimit.value)
+      loadFixMessages()
+    }
+
+    const fixMsgNext = () => {
+      fixMsgOffset.value = fixMsgOffset.value + fixMsgLimit.value
+      loadFixMessages()
+    }
+
+    const openFixMsgDetail = (msg) => {
+      fixMsgDetail.value = msg
+      fixMsgDetailOpen.value = true
+    }
+
+    const closeFixMsgDetail = () => {
+      fixMsgDetailOpen.value = false
+      fixMsgDetail.value = null
     }
 
     const themeMediaQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null
@@ -1535,6 +1712,9 @@ createApp({
 
     const runOverviewRefreshCycle = async () => {
       await loadOverview()
+      if (activePage.value === 'fix-messages') {
+        await loadFixMessages()
+      }
       queueOverviewRefresh()
     }
 
@@ -1757,7 +1937,7 @@ createApp({
         return
       }
       activePage.value = resolvedPage
-      if (replaceAlias && (currentPath === '/' || currentPath === '/index.html' || currentPath === '/order' || currentPath === '/blotter')) {
+      if (replaceAlias && (currentPath === '/' || currentPath === '/index.html' || currentPath === '/order' || currentPath === '/blotter' || currentPath === '/recentfixmsgs')) {
         window.history.replaceState({ page: resolvedPage }, '', pagePathForCode(resolvedPage))
       }
     }
@@ -1820,8 +2000,12 @@ createApp({
 
     watch(theme, applyTheme, { immediate: true })
 
-    watch(() => activePage.value, () => {
+    watch(() => activePage.value, (nextPage) => {
       runOverviewRefreshCycle().catch(() => {})
+      if (nextPage === 'fix-messages') {
+        fixMsgOffset.value = 0
+        loadFixMessages().catch(() => {})
+      }
     })
 
     watch(() => settingsState.activeProfileName, () => {
@@ -1940,6 +2124,22 @@ createApp({
       cancelDialogOpen,
       cancelTarget,
       amendDraft,
+      fixMessages,
+      fixMsgTotal,
+      fixMsgLimit,
+      fixMsgOffset,
+      fixMsgSearch,
+      fixMsgDirectionFilter,
+      fixMsgHideHeartbeats,
+      fixMsgDetailOpen,
+      fixMsgDetail,
+      fixMsgDetailFormatted,
+      filteredFixMessages,
+      loadFixMessages,
+      fixMsgPrev,
+      fixMsgNext,
+      openFixMsgDetail,
+      closeFixMsgDetail,
       sessionActionBusy,
       sessionButtonLabel,
       execTypeBadge,

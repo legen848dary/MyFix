@@ -73,6 +73,21 @@ final class TheFixClientFixService implements Application, AutoCloseable {
             .withZone(ZoneId.systemDefault());
     private static final int MAX_EVENTS = 30;
     private static final int MAX_ORDERS = 40;
+    private static final int MAX_FIX_MESSAGES = 200;
+    private static final int PREVIEW_MAX_LENGTH = 120;
+    private static final Map<String, String> MSG_TYPE_LABELS = Map.ofEntries(
+            Map.entry("0", "Heartbeat"), Map.entry("1", "Test Request"), Map.entry("2", "Resend Request"),
+            Map.entry("3", "Reject"), Map.entry("4", "Sequence Reset"), Map.entry("5", "Logout"),
+            Map.entry("8", "Execution Report"), Map.entry("9", "Order Cancel Reject"),
+            Map.entry("A", "Logon"), Map.entry("D", "New Order Single"),
+            Map.entry("F", "Order Cancel Request"), Map.entry("G", "Order Cancel/Replace"),
+            Map.entry("j", "Business Message Reject"), Map.entry("H", "Order Status Request"),
+            Map.entry("R", "Quote Request"), Map.entry("S", "Quote"),
+            Map.entry("V", "Market Data Request"), Map.entry("W", "Market Data Snapshot"),
+            Map.entry("X", "Market Data Incremental Refresh"), Map.entry("Y", "Market Data Request Reject"),
+            Map.entry("AE", "Trade Capture Report"), Map.entry("BE", "User Request"),
+            Map.entry("BF", "User Response")
+    );
 
     private final TheFixClientConfig config;
     private final TheFixSessionProfileStore profileStore;
@@ -91,6 +106,8 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     private final LinkedHashMap<String, OrderView> recentOrders = new LinkedHashMap<>();
     private final Map<String, String> clOrdIdAliases = new HashMap<>();
     private final Set<String> hiddenClOrdIds = new HashSet<>();
+    private final Deque<FixMessageRecord> recentFixMessages = new ArrayDeque<>();
+    private final AtomicLong fixMessageSequence = new AtomicLong();
 
     private SocketInitiator initiator;
     private ScheduledFuture<?> autoFlowFuture;
@@ -355,20 +372,24 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     @Override
     public void toAdmin(Message message, SessionID sessionId) {
         log.debug("toAdmin session={} type={} raw={}", sessionId, safeMessageType(message), printable(message));
+        captureFixMessage("SENT", message);
     }
 
     @Override
     public void fromAdmin(Message message, SessionID sessionId) {
         log.debug("fromAdmin session={} type={} raw={}", sessionId, safeMessageType(message), printable(message));
+        captureFixMessage("RECEIVED", message);
     }
 
     @Override
     public void toApp(Message message, SessionID sessionId) {
         log.debug("toApp session={} type={} raw={}", sessionId, safeMessageType(message), printable(message));
+        captureFixMessage("SENT", message);
     }
 
     @Override
     public synchronized void fromApp(Message message, SessionID sessionId) throws FieldNotFound {
+        captureFixMessage("RECEIVED", message);
         String messageType = message.getHeader().getString(MsgType.FIELD);
         switch (messageType) {
             case MsgType.EXECUTION_REPORT -> handleExecutionReport(message);
@@ -835,6 +856,54 @@ final class TheFixClientFixService implements Application, AutoCloseable {
                     .put("title", title)
                     .put("detail", detail);
         }
+    }
+
+    private record FixMessageRecord(long id, Instant timestamp, String direction, String msgType,
+                                     String msgTypeLabel, String preview, String rawMessage) {
+        JsonObject toJson() {
+            return new JsonObject()
+                    .put("id", id)
+                    .put("timestamp", timestamp.toString())
+                    .put("direction", direction)
+                    .put("msgType", msgType)
+                    .put("msgTypeLabel", msgTypeLabel)
+                    .put("preview", preview)
+                    .put("rawMessage", rawMessage);
+        }
+    }
+
+    private synchronized void captureFixMessage(String direction, Message message) {
+        String msgType = safeMessageType(message);
+        String label = MSG_TYPE_LABELS.getOrDefault(msgType, msgType);
+        String raw = printable(message);
+        String preview = raw.length() > PREVIEW_MAX_LENGTH ? raw.substring(0, PREVIEW_MAX_LENGTH) + "…" : raw;
+        recentFixMessages.addFirst(new FixMessageRecord(
+                fixMessageSequence.incrementAndGet(), Instant.now(), direction, msgType, label, preview, raw));
+        while (recentFixMessages.size() > MAX_FIX_MESSAGES) {
+            recentFixMessages.removeLast();
+        }
+    }
+
+    synchronized JsonObject recentFixMessagesJson(int limit, int offset) {
+        int total = recentFixMessages.size();
+        int effectiveLimit = Math.max(1, Math.min(limit, 100));
+        int effectiveOffset = Math.max(0, Math.min(offset, total));
+        JsonArray items = new JsonArray();
+        int index = 0;
+        for (FixMessageRecord record : recentFixMessages) {
+            if (index >= effectiveOffset && items.size() < effectiveLimit) {
+                items.add(record.toJson());
+            }
+            index++;
+            if (items.size() >= effectiveLimit) {
+                break;
+            }
+        }
+        return new JsonObject()
+                .put("items", items)
+                .put("total", total)
+                .put("limit", effectiveLimit)
+                .put("offset", effectiveOffset);
     }
 
     private static final class OrderView {

@@ -678,6 +678,10 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         }
     }
 
+    synchronized JsonObject recentFixMessages(int limit, int offset) {
+        return fixService.recentFixMessagesJson(limit, offset);
+    }
+
     private record MarketDefinition(String region, String code, String label, String venue, String currency, String assetClass, List<String> symbolHints) {
         JsonObject toJson() {
             return new JsonObject()

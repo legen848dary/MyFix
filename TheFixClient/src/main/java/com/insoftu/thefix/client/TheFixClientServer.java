@@ -60,8 +60,14 @@ final class TheFixClientServer {
         router.post("/api/order-flow/start").handler(ctx -> writeJson(ctx.response(), workbenchState.startOrderFlow(bodyJson(ctx))));
         router.post("/api/order-flow/stop").handler(ctx -> writeJson(ctx.response(), workbenchState.stopOrderFlow()));
 
-        router.getWithRegex("^/(home|neworder|order|orders|blotter|settings)$").handler(ctx -> ctx.reroute("/index.html"));
-        router.getWithRegex("^/(home|neworder|order|orders|blotter|settings)/$").handler(ctx -> ctx.response()
+        router.get("/api/fix-messages").handler(ctx -> {
+            int limit = Math.max(1, Math.min(parseIntParam(ctx.request().getParam("limit"), 20), 100));
+            int offset = Math.max(0, parseIntParam(ctx.request().getParam("offset"), 0));
+            writeJson(ctx.response(), workbenchState.recentFixMessages(limit, offset));
+        });
+
+        router.getWithRegex("^/(home|neworder|order|orders|blotter|settings|recentfixmsgs)$").handler(ctx -> ctx.reroute("/index.html"));
+        router.getWithRegex("^/(home|neworder|order|orders|blotter|settings|recentfixmsgs)/$").handler(ctx -> ctx.response()
                 .setStatusCode(308)
                 .putHeader("location", ctx.request().path().substring(0, ctx.request().path().length() - 1))
                 .end());
@@ -123,6 +129,17 @@ final class TheFixClientServer {
 
     private static JsonObject bodyJson(io.vertx.ext.web.RoutingContext context) {
         return context.body() == null ? new JsonObject() : context.body().asJsonObject();
+    }
+
+    private static int parseIntParam(String value, int defaultValue) {
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException exception) {
+            return defaultValue;
+        }
     }
 }
 
