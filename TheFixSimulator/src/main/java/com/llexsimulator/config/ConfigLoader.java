@@ -59,7 +59,8 @@ public final class ConfigLoader {
                 property(props, "wait.strategy", "BUSY_SPIN"),
                 Integer.parseInt(property(props, "order.pool.size", "131072")),
                 Integer.parseInt(property(props, "metrics.publish.interval", "500")),
-                Boolean.parseBoolean(property(props, "benchmark.mode.enabled", "false"))
+                Boolean.parseBoolean(property(props, "benchmark.mode.enabled", "false")),
+                Boolean.parseBoolean(property(props, "fix.cancel.amend.enabled", "true"))
         );
     }
 

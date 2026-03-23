@@ -44,6 +44,7 @@ class SimulatorBootstrapCoverageTest {
                 "BUSY_SPIN",
                 16,
                 10,
+                true,
                 true);
 
         try (MockedStatic<ConfigLoader> configLoader = org.mockito.Mockito.mockStatic(ConfigLoader.class);

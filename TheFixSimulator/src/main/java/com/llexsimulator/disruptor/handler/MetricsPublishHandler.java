@@ -21,6 +21,8 @@ import java.util.function.Consumer;
  */
 public final class MetricsPublishHandler implements EventHandler<OrderEvent> {
 
+    private static final long BENCHMARK_SNAPSHOT_INTERVAL_NS = 5_000_000_000L;
+
     private final MetricsRegistry  registry;
     private final MetricsPublisher publisher;
     private final int              publishInterval;
@@ -33,6 +35,7 @@ public final class MetricsPublishHandler implements EventHandler<OrderEvent> {
     private volatile Consumer<String> orderEventCallback;
 
     private long eventCounter = 0L;
+    private long lastBenchmarkSnapshotNs;
 
     public MetricsPublishHandler(MetricsRegistry registry,
                                  MetricsPublisher publisher,
@@ -42,6 +45,7 @@ public final class MetricsPublishHandler implements EventHandler<OrderEvent> {
         this.publisher       = publisher;
         this.publishInterval = publishInterval;
         this.livePublishingEnabled = livePublishingEnabled;
+        this.lastBenchmarkSnapshotNs = System.nanoTime();
     }
 
     /** Wire in the WebSocket broadcast callback once the web server is ready. */
@@ -51,8 +55,8 @@ public final class MetricsPublishHandler implements EventHandler<OrderEvent> {
 
     @Override
     public void onEvent(OrderEvent event, long sequence, boolean endOfBatch) {
-        long now = System.nanoTime();
-        long latencyNs = now - event.arrivalTimeNs;
+        long metricsPublishStartNs = System.nanoTime();
+        long latencyNs = metricsPublishStartNs - event.arrivalTimeNs;
 
         registry.recordLatency(latencyNs);
         registry.incrementOrdersReceived();
@@ -84,12 +88,32 @@ public final class MetricsPublishHandler implements EventHandler<OrderEvent> {
             }
         }
 
-        if (++eventCounter % publishInterval == 0) {
-            long[] snapshot = registry.snapshot();
-            if (livePublishingEnabled) {
-                publishSnapshot(now, snapshot);
+        if (livePublishingEnabled) {
+            if (++eventCounter % publishInterval == 0) {
+                long[] snapshot = registry.snapshot();
+                publishSnapshot(metricsPublishStartNs, snapshot);
                 emitOrderEvent(event, latencyNs);
             }
+        } else if (metricsPublishStartNs - lastBenchmarkSnapshotNs >= BENCHMARK_SNAPSHOT_INTERVAL_NS) {
+            registry.snapshot();
+            lastBenchmarkSnapshotNs = metricsPublishStartNs;
+        }
+
+        long metricsPublishEndNs = System.nanoTime();
+        if (event.publishCompleteNs >= event.arrivalTimeNs
+                && event.validationStartNs >= event.publishCompleteNs
+                && event.validationEndNs >= event.validationStartNs
+                && event.fillStrategyEndNs >= event.validationEndNs
+                && event.executionReportEndNs >= event.fillStrategyEndNs
+                && metricsPublishEndNs >= event.executionReportEndNs) {
+            registry.recordStageLatencies(
+                    event.validationStartNs - event.arrivalTimeNs,
+                    event.publishCompleteNs - event.arrivalTimeNs,
+                    event.validationStartNs - event.publishCompleteNs,
+                    event.validationEndNs - event.validationStartNs,
+                    event.fillStrategyEndNs - event.validationEndNs,
+                    event.executionReportEndNs - event.fillStrategyEndNs,
+                    metricsPublishEndNs - event.executionReportEndNs);
         }
     }
 

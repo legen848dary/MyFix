@@ -2,10 +2,7 @@ package com.llexsimulator.disruptor;
 
 import com.llexsimulator.engine.FixConnection;
 import com.llexsimulator.sbe.*;
-import com.lmax.disruptor.EventTranslatorVararg;
 
-import java.util.Arrays;
-import java.util.concurrent.atomic.AtomicLong;
 import uk.co.real_logic.artio.decoder.NewOrderSingleDecoder;
 import uk.co.real_logic.artio.decoder.OrderCancelReplaceRequestDecoder;
 import uk.co.real_logic.artio.decoder.OrderCancelRequestDecoder;
@@ -18,9 +15,8 @@ import uk.co.real_logic.artio.fields.ReadOnlyDecimalFloat;
  * <p>All scratch arrays are {@code byte[]} since SBE fixed-length char fields
  * use {@code byte[]} for their put/get methods.
  */
-public final class OrderEventTranslator implements EventTranslatorVararg<OrderEvent> {
+public final class OrderEventTranslator {
 
-    private static final AtomicLong CORRELATION_COUNTER = new AtomicLong(0);
     private static final long[] POW10 = {
             1L,
             10L,
@@ -38,21 +34,28 @@ public final class OrderEventTranslator implements EventTranslatorVararg<OrderEv
     private final byte[] clOrdBuf   = new byte[36];
     private final byte[] senderBuf  = new byte[16];
     private final byte[] targetBuf  = new byte[16];
+    private long correlationCounter = 0L;
 
-    @Override
-    public void translateTo(OrderEvent event, long sequence, Object... args) {
-        Object        decodedMessage = args[0];
-        FixConnection connection     = (FixConnection) args[1];
-        long          arrivalNs      = (long) args[2];
+    public void translateTo(OrderEvent event, long sequence, Object decodedMessage,
+                            FixConnection connection, long arrivalNs) {
         long          sessionConnId  = connection.connectionId();
 
-        event.correlationId       = CORRELATION_COUNTER.incrementAndGet();
+        event.correlationId       = ++correlationCounter;
         event.sessionConnectionId = sessionConnId;
         event.arrivalTimeNs       = arrivalNs;
+        event.publishCompleteNs   = 0L;
+        event.validationStartNs   = 0L;
+        event.validationEndNs     = 0L;
+        event.fillStrategyEndNs   = 0L;
+        event.executionReportEndNs = 0L;
+        event.sideValue           = (byte) OrderSide.NULL_VAL.value();
+        event.orderTypeValue      = (byte) OrderType.LIMIT.value();
+        event.orderQty            = 0L;
+        event.price               = 0L;
         event.referencedCorrelationId = 0L;
         event.requestType         = OrderRequestType.NEW;
+        event.hasOrigClOrdId      = false;
         event.isValid             = false;
-        Arrays.fill(event.origClOrdIdBytes, (byte) ' ');
 
         // ── Encode into pre-allocated orderBuffer using SBE ──────────────────
         NewOrderSingleEncoder encoder = event.nosEncoder;
@@ -67,13 +70,21 @@ public final class OrderEventTranslator implements EventTranslatorVararg<OrderEv
                 event.requestType = OrderRequestType.NEW;
                 copyCharsToBytes(decoder.clOrdID(), decoder.clOrdIDLength(), clOrdBuf, 36);
                 copyCharsToBytes(decoder.symbol(), decoder.symbolLength(), symbolBuf, 16);
-                encoder.side(mapSide(decoder.side()));
-                encoder.orderType(mapOrdType(decoder.ordType()));
+                OrderSide side = mapSide(decoder.side());
+                OrderType orderType = mapOrdType(decoder.ordType());
+                long orderQty = toScaledLong(decoder.orderQty(), 4);
+                long price = decoder.hasPrice() ? toScaledLong(decoder.price(), 8) : 0L;
+                event.sideValue = (byte) side.value();
+                event.orderTypeValue = (byte) orderType.value();
+                event.orderQty = orderQty;
+                event.price = price;
+                encoder.side(side);
+                encoder.orderType(orderType);
                 encoder.timeInForce(decoder.hasTimeInForce()
                         ? mapTif(decoder.timeInForce())
                         : com.llexsimulator.sbe.TimeInForce.DAY);
-                encoder.orderQty(toScaledLong(decoder.orderQty(), 4));
-                encoder.price(decoder.hasPrice() ? toScaledLong(decoder.price(), 8) : 0L);
+                encoder.orderQty(orderQty);
+                encoder.price(price);
                 encoder.stopPx(decoder.hasStopPx() ? toScaledLong(decoder.stopPx(), 8) : 0L);
                 encoder.transactTimeNs(arrivalNs);
             }
@@ -82,13 +93,22 @@ public final class OrderEventTranslator implements EventTranslatorVararg<OrderEv
                 copyCharsToBytes(decoder.clOrdID(), decoder.clOrdIDLength(), clOrdBuf, 36);
                 copyCharsToBytes(decoder.origClOrdID(), decoder.origClOrdIDLength(), event.origClOrdIdBytes, 36);
                 copyCharsToBytes(decoder.symbol(), decoder.symbolLength(), symbolBuf, 16);
-                encoder.side(mapSide(decoder.side()));
-                encoder.orderType(mapOrdType(decoder.ordType()));
+                OrderSide side = mapSide(decoder.side());
+                OrderType orderType = mapOrdType(decoder.ordType());
+                long orderQty = decoder.hasOrderQty() ? toScaledLong(decoder.orderQty(), 4) : 0L;
+                long price = decoder.hasPrice() ? toScaledLong(decoder.price(), 8) : 0L;
+                event.hasOrigClOrdId = decoder.origClOrdIDLength() > 0;
+                event.sideValue = (byte) side.value();
+                event.orderTypeValue = (byte) orderType.value();
+                event.orderQty = orderQty;
+                event.price = price;
+                encoder.side(side);
+                encoder.orderType(orderType);
                 encoder.timeInForce(decoder.hasTimeInForce()
                         ? mapTif(decoder.timeInForce())
                         : com.llexsimulator.sbe.TimeInForce.DAY);
-                encoder.orderQty(decoder.hasOrderQty() ? toScaledLong(decoder.orderQty(), 4) : 0L);
-                encoder.price(decoder.hasPrice() ? toScaledLong(decoder.price(), 8) : 0L);
+                encoder.orderQty(orderQty);
+                encoder.price(price);
                 encoder.stopPx(decoder.hasStopPx() ? toScaledLong(decoder.stopPx(), 8) : 0L);
                 encoder.transactTimeNs(arrivalNs);
             }
@@ -97,7 +117,13 @@ public final class OrderEventTranslator implements EventTranslatorVararg<OrderEv
                 copyCharsToBytes(decoder.clOrdID(), decoder.clOrdIDLength(), clOrdBuf, 36);
                 copyCharsToBytes(decoder.origClOrdID(), decoder.origClOrdIDLength(), event.origClOrdIdBytes, 36);
                 copyCharsToBytes(decoder.symbol(), decoder.symbolLength(), symbolBuf, 16);
-                encoder.side(mapSide(decoder.side()));
+                OrderSide side = mapSide(decoder.side());
+                event.hasOrigClOrdId = decoder.origClOrdIDLength() > 0;
+                event.sideValue = (byte) side.value();
+                event.orderTypeValue = (byte) OrderType.LIMIT.value();
+                event.orderQty = 0L;
+                event.price = 0L;
+                encoder.side(side);
                 encoder.orderType(OrderType.LIMIT);
                 encoder.timeInForce(com.llexsimulator.sbe.TimeInForce.DAY);
                 encoder.orderQty(0L);

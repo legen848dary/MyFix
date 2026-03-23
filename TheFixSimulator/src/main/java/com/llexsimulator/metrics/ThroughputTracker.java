@@ -1,6 +1,5 @@
 package com.llexsimulator.metrics;
 
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 
 /**
@@ -15,7 +14,7 @@ public final class ThroughputTracker {
 
     private final LongSupplier nanoTimeSupplier;
 
-    private final AtomicLong totalCount = new AtomicLong();
+    private long totalCount;
     private volatile long lastPerSecond;
 
     private long lastObservedTotal;
@@ -31,7 +30,7 @@ public final class ThroughputTracker {
     }
 
     public void increment() {
-        totalCount.incrementAndGet();
+        totalCount++;
     }
 
     public long getPerSecond() {
@@ -48,16 +47,16 @@ public final class ThroughputTracker {
             return lastPerSecond;
         }
 
-        long observedTotal = totalCount.get();
+        long observedTotal = totalCount;
         long delta = observedTotal - lastObservedTotal;
-        lastPerSecond = Math.round((delta * 1_000_000_000d) / Math.max(1L, elapsedNs));
+        lastPerSecond = Math.round((delta * 1_000_000_000d) / elapsedNs);
         lastObservedTotal = observedTotal;
         lastObservedAtNs = nowNs;
         return lastPerSecond;
     }
 
     public void reset() {
-        totalCount.set(0L);
+        totalCount = 0L;
         lastPerSecond = 0L;
         lastObservedTotal = 0L;
         lastObservedAtNs = nanoTimeSupplier.getAsLong();

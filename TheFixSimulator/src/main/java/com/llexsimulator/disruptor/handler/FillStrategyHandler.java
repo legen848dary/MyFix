@@ -101,6 +101,7 @@ public final class FillStrategyHandler implements EventHandler<OrderEvent> {
         }
     }
 
+
     private static void writeCancelInstruction(OrderEvent event) {
         event.fillInstructionEncoder.wrapAndApplyHeader(event.fillInstructionBuffer, 0, event.headerEncoder)
                 .correlationId(event.correlationId)

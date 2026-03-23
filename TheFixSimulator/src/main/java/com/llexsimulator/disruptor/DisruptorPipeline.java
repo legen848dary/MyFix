@@ -54,7 +54,7 @@ public final class DisruptorPipeline {
                 new OrderEventFactory(),
                 config.ringBufferSize(),
                 tf,
-                ProducerType.MULTI,
+                ProducerType.SINGLE,
                 waitStrategy
         );
 
@@ -77,7 +77,14 @@ public final class DisruptorPipeline {
     }
 
     public void publish(Object decoder, FixConnection connection, long arrivalNs) {
-        ringBuffer.publishEvent(translator, decoder, connection, arrivalNs);
+        long sequence = ringBuffer.next();
+        try {
+            OrderEvent event = ringBuffer.get(sequence);
+            translator.translateTo(event, sequence, decoder, connection, arrivalNs);
+            event.publishCompleteNs = System.nanoTime();
+        } finally {
+            ringBuffer.publish(sequence);
+        }
     }
 
     public long getRemainingCapacity() { return ringBuffer.remainingCapacity(); }

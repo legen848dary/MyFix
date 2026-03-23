@@ -48,8 +48,18 @@ public final class OrderEvent {
     public long    correlationId;
     public long    sessionConnectionId;
     public long    arrivalTimeNs;
+    public long    publishCompleteNs;
+    public long    validationStartNs;
+    public long    validationEndNs;
+    public long    fillStrategyEndNs;
+    public long    executionReportEndNs;
+    public byte    sideValue;
+    public byte    orderTypeValue;
+    public long    orderQty;
+    public long    price;
     public long    referencedCorrelationId;
     public OrderRequestType requestType = OrderRequestType.NEW;
+    public boolean hasOrigClOrdId;
     public boolean isValid;
 
     /** Default constructor — flyweights start unbound; they are wrapped per event. */

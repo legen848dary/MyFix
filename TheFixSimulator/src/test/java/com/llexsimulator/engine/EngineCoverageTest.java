@@ -1,12 +1,18 @@
 package com.llexsimulator.engine;
 
+import com.llexsimulator.disruptor.DisruptorPipeline;
+import io.aeron.logbuffer.ControlledFragmentHandler.Action;
+import org.agrona.concurrent.UnsafeBuffer;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
+import uk.co.real_logic.artio.library.FixLibrary;
+import uk.co.real_logic.artio.library.OnMessageInfo;
+import uk.co.real_logic.artio.library.SessionHandler;
 import uk.co.real_logic.artio.session.CompositeKey;
 import uk.co.real_logic.artio.session.Session;
 import uk.co.real_logic.artio.session.SessionWriter;
 
 import java.lang.reflect.Constructor;
+import java.nio.ByteBuffer;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -14,7 +20,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyInt;
+import static org.mockito.Mockito.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -139,6 +149,38 @@ class EngineCoverageTest {
         assertEquals(32, recent.size());
         assertEquals("R32", recent.getFirst().lastDisconnectReason());
         assertEquals("R1", recent.getLast().lastDisconnectReason());
+    }
+
+    @Test
+    void fixSessionApplicationCanDisableCancelAndAmendIngress() {
+        OrderSessionRegistry registry = mock(OrderSessionRegistry.class);
+        DisruptorPipeline pipeline = mock(DisruptorPipeline.class);
+        FixLibrary library = mock(FixLibrary.class);
+        Session session = session("FIX.4.4", "LLEXSIM", "CLIENT1", 120L, 1, 1, 1, true, true);
+        SessionWriter writer = mock(SessionWriter.class);
+        FixConnection connection = mock(FixConnection.class);
+        OnMessageInfo messageInfo = mock(OnMessageInfo.class);
+        UnsafeBuffer buffer = new UnsafeBuffer(ByteBuffer.allocate(8));
+
+        when(session.connectionId()).thenReturn(444L);
+        when(library.sessionWriter(120L, 444L, 1)).thenReturn(writer);
+        when(connection.sessionKey()).thenReturn("FIX.4.4:LLEXSIM->CLIENT1#120");
+        when(connection.connectionId()).thenReturn(444L);
+        when(connection.sequenceIndex()).thenReturn(1);
+        when(connection.lastReceivedMsgSeqNum()).thenReturn(1);
+        when(connection.lastSentMsgSeqNum()).thenReturn(1);
+        when(messageInfo.isValid()).thenReturn(true);
+        when(registry.register(session, writer)).thenReturn(connection);
+
+        FixSessionApplication app = new FixSessionApplication(registry, pipeline, false);
+        app.attachLibrary(library);
+        SessionHandler handler = app.onSessionAcquired(session, mock(uk.co.real_logic.artio.library.SessionAcquiredInfo.class));
+
+        assertEquals(Action.CONTINUE, handler.onMessage(buffer, 0, 0, 1, session, 1, 'F', 0L, 0L, messageInfo));
+        assertEquals(Action.CONTINUE, handler.onMessage(buffer, 0, 0, 1, session, 1, 'G', 0L, 0L, messageInfo));
+
+        verify(pipeline, never()).publish(any(), any(), anyLong());
+        verify(connection, never()).onInboundMessage(any(), anyInt(), anyLong(), anyLong());
     }
 
     @Test

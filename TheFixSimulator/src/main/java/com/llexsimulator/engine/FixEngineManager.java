@@ -26,6 +26,8 @@ public final class FixEngineManager {
     private static final Logger log = LoggerFactory.getLogger(FixEngineManager.class);
     private static final int POLL_FRAGMENT_LIMIT = 256;
     private static final int MAX_POLL_BATCHES_PER_CYCLE = 8;
+    private static final int BENCHMARK_POLL_FRAGMENT_LIMIT = 32;
+    private static final int BENCHMARK_MAX_POLL_BATCHES_PER_CYCLE = 1;
     private static final int EMPTY_POLLS_BEFORE_YIELD = 100;
     private static final int EMPTY_POLLS_BEFORE_PARK = 1_000;
     private static final long PARK_NANOS = 50_000L;
@@ -36,6 +38,9 @@ public final class FixEngineManager {
     private final FixSessionApplication app;
     private final SimulatorConfig config;
     private final FixOutboundSender outboundSender;
+    private final boolean benchmarkModeEnabled;
+    private final int pollFragmentLimit;
+    private final int maxPollBatchesPerCycle;
 
     private FixEngine engine;
     private FixLibrary library;
@@ -47,6 +52,10 @@ public final class FixEngineManager {
         this.app = app;
         this.config = config;
         this.outboundSender = outboundSender;
+        this.benchmarkModeEnabled = config.benchmarkModeEnabled();
+        this.pollFragmentLimit = config.benchmarkModeEnabled() ? BENCHMARK_POLL_FRAGMENT_LIMIT : POLL_FRAGMENT_LIMIT;
+        this.maxPollBatchesPerCycle = config.benchmarkModeEnabled()
+                ? BENCHMARK_MAX_POLL_BATCHES_PER_CYCLE : MAX_POLL_BATCHES_PER_CYCLE;
     }
 
     public void start() throws Exception {
@@ -136,7 +145,7 @@ public final class FixEngineManager {
         long deadlineNs = System.nanoTime() + 5_000_000_000L;
         SleepingIdleStrategy idleStrategy = new SleepingIdleStrategy();
         while (!library.isConnected()) {
-            library.poll(POLL_FRAGMENT_LIMIT);
+            library.poll(pollFragmentLimit);
             if (System.nanoTime() >= deadlineNs) {
                 throw new IllegalStateException("Timed out waiting for Artio library to connect");
             }
@@ -148,18 +157,25 @@ public final class FixEngineManager {
         int consecutiveEmptyPolls = 0;
         while (running.get()) {
             int totalWorkCount = 0;
-            for (int batch = 0; batch < MAX_POLL_BATCHES_PER_CYCLE; batch++) {
-                int workCount = library.poll(POLL_FRAGMENT_LIMIT);
+            totalWorkCount += outboundSender.drain();
+
+            for (int batch = 0; batch < maxPollBatchesPerCycle; batch++) {
+                int workCount = library.poll(pollFragmentLimit);
                 totalWorkCount += workCount;
-                if (workCount < POLL_FRAGMENT_LIMIT) {
+                totalWorkCount += outboundSender.drain();
+                if (workCount < pollFragmentLimit) {
                     break;
                 }
             }
 
-            totalWorkCount += outboundSender.drain();
 
             if (totalWorkCount > 0) {
                 consecutiveEmptyPolls = 0;
+                continue;
+            }
+
+            if (benchmarkModeEnabled) {
+                Thread.onSpinWait();
                 continue;
             }
 

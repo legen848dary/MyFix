@@ -59,12 +59,23 @@ class WebHandlerCoverageTest {
         registry.incrementRejects();
         registry.incrementCancels();
         registry.recordLatency(80_000L);
+        registry.recordStageLatencies(10_000L, 11_000L, 12_000L, 20_000L, 30_000L, 40_000L, 50_000L);
+        registry.recordOutboundLatencies(50_000L, 60_000L);
         registry.snapshot();
         profileManager.activate("price-improvement");
 
         CapturedResponse success = capturedResponse();
         handler.get().handle(success.context());
         assertTrue(success.body().contains("\"ordersReceived\":1"));
+        assertTrue(success.body().contains("\"p50LatencyUs\":"));
+        assertTrue(success.body().contains("\"p75LatencyUs\":"));
+        assertTrue(success.body().contains("\"maxLatencyUs\":"));
+        assertTrue(success.body().contains("\"preValidationQueueP90LatencyUs\":"));
+        assertTrue(success.body().contains("\"ingressPublishP90LatencyUs\":"));
+        assertTrue(success.body().contains("\"disruptorQueueP90LatencyUs\":"));
+        assertTrue(success.body().contains("\"metricsPublishP90LatencyUs\":"));
+        assertTrue(success.body().contains("\"outboundQueueP90LatencyUs\":"));
+        assertTrue(success.body().contains("\"outboundSendP90LatencyUs\":"));
         assertTrue(success.body().contains("\"activeProfile\":\"price-improvement\""));
 
         CapturedResponse reset = capturedResponse();

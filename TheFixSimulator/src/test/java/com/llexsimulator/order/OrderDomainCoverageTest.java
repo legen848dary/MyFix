@@ -149,5 +149,34 @@ class OrderDomainCoverageTest {
         repository.release(999L);
         assertEquals(1, repository.pooledCount());
     }
+
+    @Test
+    void orderRepositoryClOrdIdIndexRemainsUsableAcrossRepeatedInsertReleaseChurn() {
+        OrderRepository repository = new OrderRepository(8);
+
+        for (int i = 0; i < 2_000; i++) {
+            long correlationId = i + 1L;
+            String clOrdId = "CL-" + correlationId;
+
+            OrderState state = repository.claim(correlationId);
+            assertNotNull(state);
+            state.setCorrelationId(correlationId);
+            state.setClOrdId(ascii36(clOrdId), 0, 36);
+            repository.indexClOrdId(correlationId, ascii36(clOrdId), 36);
+
+            assertSame(state, repository.findByClOrdId(ascii36(clOrdId), 36));
+
+            repository.release(correlationId);
+            assertNull(repository.findByClOrdId(ascii36(clOrdId), 36));
+        }
+
+        OrderState finalState = repository.claim(9_999L);
+        assertNotNull(finalState);
+        finalState.setCorrelationId(9_999L);
+        finalState.setClOrdId(ascii36("FINAL-CL-9999"), 0, 36);
+        repository.indexClOrdId(9_999L, ascii36("FINAL-CL-9999"), 36);
+
+        assertSame(finalState, repository.findByClOrdId(ascii36("FINAL-CL-9999"), 36));
+    }
 }
 

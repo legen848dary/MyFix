@@ -24,6 +24,11 @@ public final class OrderEventFixtures {
         event.correlationId = correlationId;
         event.sessionConnectionId = sessionConnectionId;
         event.arrivalTimeNs = 123_456_789L;
+        event.sideValue = (byte) side.value();
+        event.orderTypeValue = (byte) OrderType.LIMIT.value();
+        event.orderQty = orderQty;
+        event.price = price;
+        event.hasOrigClOrdId = false;
 
         NewOrderSingleEncoder encoder = event.nosEncoder;
         encoder.wrapAndApplyHeader(event.orderBuffer, 0, event.headerEncoder);
@@ -72,6 +77,9 @@ public final class OrderEventFixtures {
         event.nosEncoder.putClOrdId(ascii36(clOrdId), 0);
         event.nosEncoder.putSymbol(ascii16(symbol), 0);
         System.arraycopy(ascii36(origClOrdId), 0, event.origClOrdIdBytes, 0, 36);
+        event.hasOrigClOrdId = !origClOrdId.isBlank();
+        event.orderQty = 0L;
+        event.price = 0L;
         event.nosDecoder.wrapAndApplyHeader(event.orderBuffer, 0, event.headerDecoder);
         return event;
     }
@@ -84,6 +92,9 @@ public final class OrderEventFixtures {
         event.nosEncoder.putClOrdId(ascii36(clOrdId), 0);
         event.nosEncoder.putSymbol(ascii16(symbol), 0);
         System.arraycopy(ascii36(origClOrdId), 0, event.origClOrdIdBytes, 0, 36);
+        event.hasOrigClOrdId = !origClOrdId.isBlank();
+        event.orderQty = orderQty;
+        event.price = price;
         event.nosDecoder.wrapAndApplyHeader(event.orderBuffer, 0, event.headerDecoder);
         return event;
     }

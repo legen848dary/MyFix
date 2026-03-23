@@ -19,7 +19,6 @@ import uk.co.real_logic.artio.session.Session;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.nio.charset.StandardCharsets;
 
 import static com.llexsimulator.testutil.OrderEventFixtures.decodeFillInstruction;
 import static com.llexsimulator.testutil.OrderEventFixtures.newAmendRequestEvent;
@@ -40,6 +39,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -78,6 +78,10 @@ class HandlerCoverageTest {
                 .transactTimeNs(9L)
                 .fixVersion(com.llexsimulator.sbe.FixVersion.FIX44);
         invalidPrice.nosDecoder.wrapAndApplyHeader(invalidPrice.orderBuffer, 0, invalidPrice.headerDecoder);
+        invalidPrice.sideValue = (byte) OrderSide.SELL.value();
+        invalidPrice.orderTypeValue = (byte) OrderType.LIMIT.value();
+        invalidPrice.orderQty = 10_000L;
+        invalidPrice.price = 0L;
         handler.onEvent(invalidPrice, 0L, true);
         assertFalse(invalidPrice.isValid);
         assertEquals(RejectReason.INVALID_PRICE, decodeFillInstruction(invalidPrice).rejectReasonCode());
@@ -357,6 +361,7 @@ class HandlerCoverageTest {
         ExecutionReportHandler executionReportHandler = mock(ExecutionReportHandler.class);
         MetricsPublishHandler metricsPublishHandler = mock(MetricsPublishHandler.class);
         CompositeOrderEventHandler composite = new CompositeOrderEventHandler(
+                false,
                 validationHandler, fillStrategyHandler, executionReportHandler, metricsPublishHandler);
         OrderEvent event = new OrderEvent();
 
@@ -368,6 +373,38 @@ class HandlerCoverageTest {
         verify(fillStrategyHandler).onEvent(event, 7L, false);
         verify(executionReportHandler).onEvent(event, 7L, false);
         verify(metricsPublishHandler).onEvent(event, 7L, false);
+        assertEquals(0L, event.validationStartNs);
+        assertEquals(0L, event.validationEndNs);
+        assertEquals(0L, event.fillStrategyEndNs);
+        assertEquals(0L, event.executionReportEndNs);
+    }
+
+    @Test
+    void compositeOrderEventHandlerCapturesBenchmarkStageTimestamps() {
+        ValidationHandler validationHandler = mock(ValidationHandler.class);
+        FillStrategyHandler fillStrategyHandler = mock(FillStrategyHandler.class);
+        ExecutionReportHandler executionReportHandler = mock(ExecutionReportHandler.class);
+        MetricsPublishHandler metricsPublishHandler = mock(MetricsPublishHandler.class);
+        doAnswer(invocation -> {
+            OrderEvent event = invocation.getArgument(0);
+            event.isValid = true;
+            return null;
+        }).when(validationHandler).onEvent(any(OrderEvent.class), anyLong(), eq(true));
+
+        CompositeOrderEventHandler composite = new CompositeOrderEventHandler(
+                true,
+                validationHandler, fillStrategyHandler, executionReportHandler, metricsPublishHandler);
+        OrderEvent event = new OrderEvent();
+        event.arrivalTimeNs = System.nanoTime();
+
+        composite.onEvent(event, 8L, true);
+
+        assertTrue(event.validationStartNs > 0L);
+        assertTrue(event.validationEndNs >= event.validationStartNs);
+        assertTrue(event.validationEndNs > 0L);
+        assertTrue(event.fillStrategyEndNs >= event.validationEndNs);
+        assertTrue(event.executionReportEndNs >= event.fillStrategyEndNs);
+        verify(metricsPublishHandler).onEvent(event, 8L, true);
     }
 
     private static void seedActiveOrder(OrderRepository repository, long correlationId, long sessionConnectionId,

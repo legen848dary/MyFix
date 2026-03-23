@@ -22,21 +22,23 @@ public final class ValidationHandler implements EventHandler<OrderEvent> {
         // Basic field validation — all reads from off-heap SBE flyweight
         boolean valid = true;
         RejectReason rejectReason = RejectReason.SIMULATOR_REJECT;
+        byte nullSide = (byte) OrderSide.NULL_VAL.value();
+        byte limitOrderType = (byte) OrderType.LIMIT.value();
 
         if (event.requestType == OrderRequestType.CANCEL) {
-            if (isBlank(event.origClOrdIdBytes)) {
+            if (!event.hasOrigClOrdId) {
                 valid = false;
-            } else if (event.nosDecoder.side() == OrderSide.NULL_VAL) {
+            } else if (event.sideValue == nullSide) {
                 valid = false;
             }
         } else {
-            if (isBlank(event.origClOrdIdBytes) && event.requestType == OrderRequestType.AMEND) {
+            if (!event.hasOrigClOrdId && event.requestType == OrderRequestType.AMEND) {
                 valid = false;
-            } else if (event.nosDecoder.side() == OrderSide.NULL_VAL) {
+            } else if (event.sideValue == nullSide) {
                 valid = false;
-            } else if (event.nosDecoder.orderQty() <= 0) {
+            } else if (event.orderQty <= 0) {
                 valid = false;
-            } else if (event.nosDecoder.orderType() == OrderType.LIMIT && event.nosDecoder.price() <= 0) {
+            } else if (event.orderTypeValue == limitOrderType && event.price <= 0) {
                 valid = false;
                 rejectReason = RejectReason.INVALID_PRICE;
             }
@@ -65,15 +67,6 @@ public final class ValidationHandler implements EventHandler<OrderEvent> {
             event.fillInstructionDecoder.wrapAndApplyHeader(
                     event.fillInstructionBuffer, 0, event.headerDecoder);
         }
-    }
-
-    private static boolean isBlank(byte[] bytes) {
-        for (byte value : bytes) {
-            if (value != 0 && value != ' ') {
-                return false;
-            }
-        }
-        return true;
     }
 }
 

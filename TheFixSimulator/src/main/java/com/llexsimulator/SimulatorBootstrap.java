@@ -75,7 +75,7 @@ public final class SimulatorBootstrap {
 
         // 6 — Disruptor pipeline
         OrderSessionRegistry sessionRegistry = new OrderSessionRegistry(config.benchmarkModeEnabled());
-        FixOutboundSender outboundSender = new FixOutboundSender();
+        FixOutboundSender outboundSender = new FixOutboundSender(metricsRegistry, config.benchmarkModeEnabled());
 
         ValidationHandler     validationHandler     = new ValidationHandler();
         FillStrategyHandler   fillStrategyHandler   = new FillStrategyHandler(profileManager, orderRepository);
@@ -84,6 +84,7 @@ public final class SimulatorBootstrap {
         MetricsPublishHandler  metricsPublishHandler = new MetricsPublishHandler(
                 metricsRegistry, metricsPublisher, config.metricsPublishInterval(), liveMetricsEnabled);
         CompositeOrderEventHandler compositeOrderEventHandler = new CompositeOrderEventHandler(
+                config.benchmarkModeEnabled(),
                 validationHandler, fillStrategyHandler, execReportHandler, metricsPublishHandler);
 
         disruptorPipeline = new DisruptorPipeline(config, compositeOrderEventHandler);
@@ -107,7 +108,10 @@ public final class SimulatorBootstrap {
         }
 
         // 9 — FIX engine (last — everything must be ready before accepting connections)
-        FixSessionApplication fixApp = new FixSessionApplication(sessionRegistry, disruptorPipeline);
+        FixSessionApplication fixApp = new FixSessionApplication(
+                sessionRegistry,
+                disruptorPipeline,
+                config.cancelAmendEnabled());
         fixEngineManager = new FixEngineManager(fixApp, config, outboundSender);
         fixEngineManager.start();
 

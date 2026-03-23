@@ -32,6 +32,7 @@ import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -64,9 +65,9 @@ public final class FixDemoClientApplication implements Application, AutoCloseabl
     };
 
     private final FixDemoClientConfig config;
-    private final ScheduledExecutorService senderExecutor;
     private final ScheduledExecutorService statsExecutor;
     private final AtomicReference<SessionID> activeSessionId = new AtomicReference<>();
+    private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean loggedOn = new AtomicBoolean(false);
     private final AtomicLong clOrdCounter = new AtomicLong();
     private final AtomicLong logonCount = new AtomicLong();
@@ -80,14 +81,10 @@ public final class FixDemoClientApplication implements Application, AutoCloseabl
     private volatile long lastSentSnapshot;
     private volatile long lastExecReportSnapshot;
     private volatile long lastRejectSnapshot;
+    private volatile Thread senderThread;
 
     public FixDemoClientApplication(FixDemoClientConfig config) {
         this.config = config;
-        this.senderExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "fix-demo-sender");
-            t.setDaemon(true);
-            return t;
-        });
         this.statsExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "fix-demo-stats");
             t.setDaemon(true);
@@ -96,8 +93,11 @@ public final class FixDemoClientApplication implements Application, AutoCloseabl
     }
 
     public void start() {
-        long periodNanos = Math.max(1L, 1_000_000_000L / config.ratePerSecond());
-        senderExecutor.scheduleAtFixedRate(this::sendOneIfLoggedOn, 0L, periodNanos, TimeUnit.NANOSECONDS);
+        running.set(true);
+        Thread thread = new Thread(this::runSenderLoop, "fix-demo-sender");
+        thread.setDaemon(true);
+        senderThread = thread;
+        thread.start();
         statsExecutor.scheduleAtFixedRate(this::logProgress, 5L, 5L, TimeUnit.SECONDS);
         log.info("Demo client ready: beginString={} senderCompId={} targetCompId={} host={} port={} rate={} msg/s symbol=RANDOM{} side={} qty={} price={}",
                 config.beginString(), config.senderCompId(), config.targetCompId(),
@@ -225,6 +225,41 @@ public final class FixDemoClientApplication implements Application, AutoCloseabl
         }
     }
 
+    private void runSenderLoop() {
+        long periodNanos = Math.max(1L, 1_000_000_000L / config.ratePerSecond());
+        long nextSendDeadlineNs = System.nanoTime();
+
+        while (running.get()) {
+            SessionID sessionId = activeSessionId.get();
+            if (!loggedOn.get() || sessionId == null) {
+                nextSendDeadlineNs = System.nanoTime() + periodNanos;
+                LockSupport.parkNanos(Math.min(periodNanos, 1_000_000L));
+                continue;
+            }
+
+            Session session = Session.lookupSession(sessionId);
+            if (session == null || !session.isLoggedOn()) {
+                nextSendDeadlineNs = System.nanoTime() + periodNanos;
+                LockSupport.parkNanos(Math.min(periodNanos, 1_000_000L));
+                continue;
+            }
+
+            long nowNs = System.nanoTime();
+            long waitNs = nextSendDeadlineNs - nowNs;
+            if (waitNs > 0L) {
+                LockSupport.parkNanos(waitNs);
+                continue;
+            }
+
+            sendOneIfLoggedOn();
+            long postSendNowNs = System.nanoTime();
+            nextSendDeadlineNs += periodNanos;
+            if (nextSendDeadlineNs < postSendNowNs) {
+                nextSendDeadlineNs = postSendNowNs + periodNanos;
+            }
+        }
+    }
+
     private NewOrderSingle buildNewOrderSingle(String clOrdId) {
         String symbol = SYMBOLS[ThreadLocalRandom.current().nextInt(SYMBOLS.length)];
         NewOrderSingle order = new NewOrderSingle(
@@ -289,7 +324,11 @@ public final class FixDemoClientApplication implements Application, AutoCloseabl
 
     @Override
     public void close() {
-        senderExecutor.shutdownNow();
+        running.set(false);
+        Thread thread = senderThread;
+        if (thread != null) {
+            thread.interrupt();
+        }
         statsExecutor.shutdownNow();
     }
 }

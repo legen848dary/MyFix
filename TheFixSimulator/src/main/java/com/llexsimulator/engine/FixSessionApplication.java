@@ -29,12 +29,14 @@ public final class FixSessionApplication implements SessionAcquireHandler {
 
     private final OrderSessionRegistry registry;
     private final DisruptorPipeline pipeline;
+    private final boolean cancelAmendEnabled;
 
     private volatile FixLibrary library;
 
-    public FixSessionApplication(OrderSessionRegistry registry, DisruptorPipeline pipeline) {
+    public FixSessionApplication(OrderSessionRegistry registry, DisruptorPipeline pipeline, boolean cancelAmendEnabled) {
         this.registry = registry;
         this.pipeline = pipeline;
+        this.cancelAmendEnabled = cancelAmendEnabled;
     }
 
     public void attachLibrary(FixLibrary library) {
@@ -75,6 +77,10 @@ public final class FixSessionApplication implements SessionAcquireHandler {
                                 long position, OnMessageInfo messageInfo) {
 
             if (!messageInfo.isValid()) {
+                return Action.CONTINUE;
+            }
+
+            if (!cancelAmendEnabled && (messageType == ORDER_CANCEL_REPLACE_REQUEST_TYPE || messageType == ORDER_CANCEL_REQUEST_TYPE)) {
                 return Action.CONTINUE;
             }
 

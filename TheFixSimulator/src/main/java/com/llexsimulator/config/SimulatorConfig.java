@@ -19,7 +19,8 @@ public record SimulatorConfig(
         String waitStrategy,
         int    orderPoolSize,
         int    metricsPublishInterval,
-        boolean benchmarkModeEnabled
+        boolean benchmarkModeEnabled,
+        boolean cancelAmendEnabled
 ) {
     /** Default configuration with sensible low-latency values. */
     public static SimulatorConfig defaults() {
@@ -28,7 +29,7 @@ public record SimulatorConfig(
                 8080, "/tmp/aeron-llexsim",
                 AeronRuntimeTuning.DEFAULT_ARTIO_LIBRARY_CHANNEL,
                 AeronRuntimeTuning.DEFAULT_METRICS_CHANNEL,
-                131072, "BUSY_SPIN", 131072, 500, false
+                131072, "BUSY_SPIN", 131072, 500, false, true
         );
     }
 
@@ -49,7 +50,8 @@ public record SimulatorConfig(
                 waitStrategy,
                 orderPoolSize,
                 metricsPublishInterval,
-                benchmarkModeEnabled);
+                benchmarkModeEnabled,
+                cancelAmendEnabled);
     }
 }
 

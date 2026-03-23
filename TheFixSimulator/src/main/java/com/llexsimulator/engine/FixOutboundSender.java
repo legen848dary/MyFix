@@ -1,5 +1,6 @@
 package com.llexsimulator.engine;
 
+import com.llexsimulator.metrics.MetricsRegistry;
 import org.agrona.concurrent.ManyToOneConcurrentLinkedQueue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,8 +29,12 @@ public final class FixOutboundSender {
     private final ConcurrentLinkedDeque<PendingExecutionReport> pool = new ConcurrentLinkedDeque<>();
     private final ExecutionReportEncoder executionReport = new ExecutionReportEncoder();
     private final UtcTimestampEncoder timestampEncoder = new UtcTimestampEncoder();
+    private final MetricsRegistry metricsRegistry;
+    private final boolean benchmarkStageTimingEnabled;
 
-    public FixOutboundSender() {
+    public FixOutboundSender(MetricsRegistry metricsRegistry, boolean benchmarkStageTimingEnabled) {
+        this.metricsRegistry = metricsRegistry;
+        this.benchmarkStageTimingEnabled = benchmarkStageTimingEnabled;
         for (int i = 0; i < INITIAL_REPORT_POOL_SIZE; i++) {
             pool.offerFirst(new PendingExecutionReport());
         }
@@ -60,7 +65,8 @@ public final class FixOutboundSender {
                 side, orderQty, price, lastQty, lastPx,
                 cumQty, leavesQty,
                 execType, ordStatus,
-                ordRejReason);
+                ordRejReason,
+                benchmarkStageTimingEnabled ? System.nanoTime() : 0L);
         queue.add(pending);
     }
 
@@ -72,7 +78,9 @@ public final class FixOutboundSender {
                 break;
             }
 
+            long sendStartNs = benchmarkStageTimingEnabled ? System.nanoTime() : 0L;
             long result = trySend(pending);
+            long sendEndNs = benchmarkStageTimingEnabled ? System.nanoTime() : 0L;
             Session session = pending.connection.session();
             if (Pressure.isBackPressured(result)) {
                 pending.connection.onOutboundBackpressure(session, pending.outboundEvent, result);
@@ -80,6 +88,12 @@ public final class FixOutboundSender {
                         pending.connection.sessionKey(), result);
                 queue.add(pending);
                 break;
+            }
+
+            if (benchmarkStageTimingEnabled && pending.enqueueTimeNs > 0L) {
+                metricsRegistry.recordOutboundLatencies(
+                        Math.max(0L, sendStartNs - pending.enqueueTimeNs),
+                        Math.max(0L, sendEndNs - sendStartNs));
             }
 
             if (result >= 0L) {
@@ -165,6 +179,7 @@ public final class FixOutboundSender {
         private char execType;
         private char ordStatus;
         private int ordRejReason;
+        private long enqueueTimeNs;
 
         private void init(
                 FixConnection connection,
@@ -176,7 +191,8 @@ public final class FixOutboundSender {
                 char side, long orderQty, long price, long lastQty, long lastPx,
                 long cumQty, long leavesQty,
                 char execType, char ordStatus,
-                int ordRejReason) {
+                int ordRejReason,
+                long enqueueTimeNs) {
             this.connection = connection;
             this.outboundEvent = outboundEvent;
             this.clOrdIdLength = copyBytes(clOrdId, clOrdIdLength, this.clOrdId);
@@ -193,6 +209,7 @@ public final class FixOutboundSender {
             this.execType = execType;
             this.ordStatus = ordStatus;
             this.ordRejReason = ordRejReason;
+            this.enqueueTimeNs = enqueueTimeNs;
         }
 
         private void reset() {
@@ -212,6 +229,7 @@ public final class FixOutboundSender {
             execType = 0;
             ordStatus = 0;
             ordRejReason = 0;
+            enqueueTimeNs = 0L;
         }
 
         private static int copyBytes(byte[] source, int requestedLength, byte[] target) {

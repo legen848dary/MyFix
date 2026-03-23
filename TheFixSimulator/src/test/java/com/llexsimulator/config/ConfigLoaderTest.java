@@ -28,14 +28,15 @@ class ConfigLoaderTest {
         Path externalConfig = tempDir.resolve("external.properties");
         Path localConfig = tempDir.resolve("local.properties");
 
-        Files.writeString(externalConfig, "fix.port=9991\nwait.strategy=SLEEPING\nbenchmark.mode.enabled=true\n");
-        Files.writeString(localConfig, "fix.port=9992\nwait.strategy=BUSY_SPIN\nbenchmark.mode.enabled=false\n");
+        Files.writeString(externalConfig, "fix.port=9991\nwait.strategy=SLEEPING\nbenchmark.mode.enabled=true\nfix.cancel.amend.enabled=false\n");
+        Files.writeString(localConfig, "fix.port=9992\nwait.strategy=BUSY_SPIN\nbenchmark.mode.enabled=false\nfix.cancel.amend.enabled=true\n");
 
         SimulatorConfig config = ConfigLoader.load(externalConfig, localConfig);
 
         assertEquals(9991, config.fixPort());
         assertEquals("SLEEPING", config.waitStrategy());
         assertTrue(config.benchmarkModeEnabled());
+        assertFalse(config.cancelAmendEnabled());
     }
 
     @Test
@@ -62,6 +63,7 @@ class ConfigLoaderTest {
         assertEquals("aeron:ipc?term-length=8388608", config.artioLibraryAeronChannel());
         assertEquals("aeron:ipc?term-length=65536", config.metricsAeronChannel());
         assertFalse(config.benchmarkModeEnabled());
+        assertTrue(config.cancelAmendEnabled());
     }
 }
 
