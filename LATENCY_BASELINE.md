@@ -18,7 +18,7 @@ Only update this file after:
 1. running from a clean committed git worktree with an upstream branch configured,
 2. rebuilding the simulator,
 3. rerunning the direct-JVM benchmark,
-4. confirming `p90 < 100 µs` at `500 msg/s`, and
+4. confirming `p90 < 10 µs` at `500 msg/s`, and
 5. confirming the build is green.
 
 Keep the previous good entry if a later change regresses latency.
