@@ -112,6 +112,20 @@ cd TheFixSimulator
 ./gradlew :TheFixSimulator:test
 ```
 
+## Quick latency check
+
+Use the dedicated wrapper when you want a fast 500 msg/s direct-JVM check that prints only the key latency percentiles:
+
+```bash
+bash ./TheFixSimulator/scripts/run_benchmark_direct_jvm_500.sh
+```
+
+Optional build-first run:
+
+```bash
+bash ./TheFixSimulator/scripts/run_benchmark_direct_jvm_500.sh --build
+```
+
 ## Next step
 
 The next implementation checkpoint is to polish and extend the new combined web-stack workflows while keeping the terminal demo FIX client opt-in.
