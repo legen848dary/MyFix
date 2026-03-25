@@ -1,24 +1,27 @@
 # Latency Baseline Tracker
 
-This file records the last verified commit that stayed under the latency target so we do not lose track while iterating on performance or features.
+This file records the accepted direct-JVM latency checkpoints so we do not lose track while iterating on performance or features.
 
-## Last known good baseline
+Guarded baseline updates create immutable rollback tags named `latency-known-good-<commit>`.
 
-- Verified on: 2026-03-25
-- Commit hash: `67f611f8ee6499668cb18c36fcf5748aa1e1b16d`
-- Benchmark mode: direct JVM, no Docker
-- Benchmark rate: `500 msg/s`
-- p50 latency: `4 µs`
-- p90 latency: `5 µs`
-- Benchmark artifact: `TheFixSimulator/logs/direct-jvm-benchmark-reports/20260325-234444`
+## Baseline history
+
+| Datetime (HKT) | Commit hash | Msg/s | p50 (µs) | p75 (µs) | p90 (µs) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 2026-03-25 23:44:44 HKT | `67f611f8ee6499668cb18c36fcf5748aa1e1b16d` | 500 | 4 | 4 | 5 |
 
 ## Update rule
 
 Only update this file after:
-1. running from a clean committed git worktree with an upstream branch configured,
-2. rebuilding the simulator,
-3. rerunning the direct-JVM benchmark,
-4. confirming `p90 < 100 µs` at `500 msg/s`, and
-5. confirming the build is green.
+1. running from a clean committed git worktree on a named branch with an upstream configured,
+2. rerunning the exact direct-JVM 500 msg/s benchmark,
+3. confirming the benchmark artifact metadata is present and matches the expected mode/rate,
+4. confirming `p90 < 10 µs` at `500 msg/s`,
+5. confirming the root build is green, and
+6. confirming the new baseline does not regress versus the latest recorded `p90` unless `--allow-regression` is used intentionally.
 
-Keep the previous good entry if a later change regresses latency.
+Use the known-good tag for rollback, for example:
+
+```bash
+git checkout latency-known-good-67f611f
+```

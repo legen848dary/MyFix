@@ -30,8 +30,13 @@ A new session should read this file first, then continue from the **Immediate ne
 - `TheFixClient` has been upgraded from a placeholder console app into a live simulator-linked FIX workstation and is now containerized.
 - The repo now has one-command start/stop workflows for both web apps in Docker and direct JVM modes.
 - The terminal demo FIX client remains opt-in and is no longer started by default by the combined startup helpers.
-- Added `LATENCY_BASELINE.md` to preserve the last verified direct-JVM p90-under-target commit hash.
+- Added `LATENCY_BASELINE.md` to preserve the last verified direct-JVM `p90 < 10 µs` commit history at 500 msg/s.
 - Added `TheFixSimulator/scripts/run_benchmark_direct_jvm_500.sh` for quick 500 msg/s p50/p75/p90 checks.
+- Strengthened the 500 msg/s latency-baseline workflow:
+  - benchmark artifacts now include timestamp + reproducible command metadata
+  - guarded baseline updates now create/reuse an immutable `latency-known-good-<commit>` tag
+  - guarded baseline updates now refuse slower baseline overwrites unless explicitly allowed with `--allow-regression`
+  - `LATENCY_BASELINE.md` now keeps a datetime-sorted history table of accepted 500 msg/s p50/p75/p90 checkpoints
 - Once all verification commands below are green, it is safe to commit and push the checkpoint.
 
 ## Latest verified green state
@@ -257,7 +262,8 @@ Key files:
 - Polish combined web-stack docs and operational ergonomics as needed
 - Optionally add a combined workflow that can also start the terminal demo FIX client on demand
 - Consider adding automated smoke tests around the new launcher scripts
-- Keep the latency baseline file updated whenever a new commit is verified under the 500 msg/s p90 target
+- Keep the latency baseline file updated whenever a new commit is verified with `p90 < 10 µs` at 500 msg/s
+- Keep the immutable `latency-known-good-<commit>` tag aligned with the latest accepted `LATENCY_BASELINE.md` entry
 
 ### Next integration milestone
 - Extend local deployment so all 3 components can run together when explicitly requested:
@@ -353,7 +359,7 @@ User requested:
 1. Improve combined web-stack polish/docs/tests as needed
 2. Keep the terminal demo FIX client available as an explicit opt-in workflow only
 3. Consider adding optional combined-stack support for the terminal demo FIX client when explicitly requested
-4. Use `LATENCY_BASELINE.md` as the source of truth for the last good p90-under-target commit during future optimization passes
+4. Use `LATENCY_BASELINE.md` as the source of truth for the last good `p90 < 10 µs` commit during future optimization passes
 5. On the next chat, start from this now-green checkpoint and rerun any verification commands needed before making further changes
 
 ## If a new chat session resumes from here

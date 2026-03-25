@@ -126,6 +126,40 @@ Optional build-first run:
 bash ./TheFixSimulator/scripts/run_benchmark_direct_jvm_500.sh --build
 ```
 
+## Update the known-good latency baseline
+
+When a benchmark run is clean and acceptable, use the guarded baseline-update mode:
+
+```bash
+bash ./TheFixSimulator/scripts/run_benchmark_direct_jvm_500.sh --build --update-baseline
+```
+
+What this guarded mode does:
+
+- requires a clean committed git worktree on a named branch with an upstream
+- reruns the direct-JVM 500 msg/s benchmark and validates the artifact metadata
+- requires the accepted benchmark result to stay under `p90 < 10 µs`
+- refuses to overwrite a faster recorded baseline unless you explicitly opt in with `--allow-regression`
+- verifies the root build is green
+- updates `LATENCY_BASELINE.md` as a datetime-sorted history table with:
+  - datetime
+  - commit hash
+  - msg/s
+  - p50 / p75 / p90 latency
+- pushes both the baseline commit and the known-good tag
+
+If you intentionally need to record a slower but still accepted baseline, use:
+
+```bash
+bash ./TheFixSimulator/scripts/run_benchmark_direct_jvm_500.sh --build --update-baseline --allow-regression
+```
+
+For rollback, use the immutable tag recorded in `LATENCY_BASELINE.md`:
+
+```bash
+git checkout <known-good-tag>
+```
+
 ## Next step
 
 The next implementation checkpoint is to polish and extend the new combined web-stack workflows while keeping the terminal demo FIX client opt-in.

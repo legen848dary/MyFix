@@ -17,6 +17,8 @@ HEAP_XMX="${BENCHMARK_JAVA_XMX:-512m}"
 WAIT_STRATEGY="${BENCHMARK_WAIT_STRATEGY:-BUSY_SPIN}"
 FIX_CANCEL_AMEND_ENABLED="${BENCHMARK_FIX_CANCEL_AMEND_ENABLED:-true}"
 BUILD_FIRST=false
+BENCHMARK_STARTED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+BENCHMARK_STARTED_AT_HKT="$(TZ=Asia/Hong_Kong date '+%Y-%m-%d %H:%M:%S HKT')"
 
 usage() {
   cat <<EOF
@@ -91,6 +93,23 @@ RUN_ID="$(date +%Y%m%d-%H%M%S)"
 ARTIFACT_DIR="${ARTIFACTS_ROOT}/${RUN_ID}"
 mkdir -p "$ARTIFACT_DIR" "$ARTIFACT_DIR/artio-state" "$ARTIFACT_DIR/aeron" "$ARTIFACT_DIR/fix-demo-client"
 
+BENCHMARK_COMMAND=("./TheFixSimulator/scripts/run_benchmark_direct_jvm.sh")
+if [[ "$BUILD_FIRST" == true ]]; then
+  BENCHMARK_COMMAND+=("--build")
+fi
+BENCHMARK_COMMAND+=(
+  "--rate" "$RATE"
+  "--warmup" "$WARMUP_SEC"
+  "--duration" "$DURATION_SEC"
+  "--sample-interval" "$SAMPLE_INTERVAL_SEC"
+  "--sim-web-port" "$SIM_WEB_PORT"
+  "--fix-port" "$FIX_PORT"
+)
+if [[ "$FIX_CANCEL_AMEND_ENABLED" != true ]]; then
+  BENCHMARK_COMMAND+=("--disable-amend-cancel")
+fi
+BENCHMARK_COMMAND_STRING="${BENCHMARK_COMMAND[*]}"
+
 cleanup() {
   set +e
   if [[ -n "${CLIENT_PID:-}" ]] && kill -0 "$CLIENT_PID" 2>/dev/null; then
@@ -128,7 +147,10 @@ fi
 
 cat > "${ARTIFACT_DIR}/metadata.txt" <<EOF
 mode=direct-jvm-warm
+benchmark_started_at_utc=${BENCHMARK_STARTED_AT_UTC}
+benchmark_started_at_hkt=${BENCHMARK_STARTED_AT_HKT}
 run_id=${RUN_ID}
+benchmark_command=${BENCHMARK_COMMAND_STRING}
 rate=${RATE}
 warmup_sec=${WARMUP_SEC}
 duration_sec=${DURATION_SEC}
@@ -439,4 +461,5 @@ if samples_path.exists():
 PY
 
 echo "artifact_dir=${ARTIFACT_DIR}"
+echo "metadata_file=${ARTIFACT_DIR}/metadata.txt"
 
