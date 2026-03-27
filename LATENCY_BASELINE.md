@@ -8,8 +8,10 @@ Guarded baseline updates create immutable rollback tags named `latency-known-goo
 
 | Datetime (HKT) | Commit hash | Msg/s | p50 (µs) | p75 (µs) | p90 (µs) |
 | --- | --- | ---: | ---: | ---: | ---: |
+| 2026-03-27 15:25:10 HKT | `2c449a84da85958e0645c9f0d9522bafb6a05d57` | 500 | 4 | 5 | 5 |
 | 2026-03-26 00:37:37 HKT | `aa8248c18c9bb4e996282785b61dcd2ae8de7d24` | 500 | 4 | 5 | 6 |
 | 2026-03-25 23:44:44 HKT | `67f611f8ee6499668cb18c36fcf5748aa1e1b16d` | 500 | 4 | 4 | 5 |
+| --- | `---` | ---: | ---: | ---: | ---: |
 | --- | `---` | ---: | ---: | ---: | ---: |
 
 ## Update rule
@@ -25,5 +27,5 @@ Only update this file after:
 Use the known-good tag for rollback, for example:
 
 ```bash
-git checkout latency-known-good-aa8248c
+git checkout latency-known-good-2c449a8
 ```
