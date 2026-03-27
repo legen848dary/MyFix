@@ -47,7 +47,7 @@ class TheFixClientServerRoutingTest {
         server.start();
 
         HttpClient client = HttpClient.newHttpClient();
-        for (String path : List.of("/", "/home", "/neworder", "/order", "/orders", "/blotter", "/settings")) {
+        for (String path : List.of("/", "/home", "/neworder", "/order", "/orders", "/blotter", "/settings", "/session-profiles", "/about")) {
             HttpResponse<String> response = send(client, path);
             assertEquals(200, response.statusCode(), "Unexpected status for " + path);
             assertTrue(response.headers().firstValue("content-type").orElse("").contains("text/html"), "Expected HTML for " + path);
@@ -61,7 +61,11 @@ class TheFixClientServerRoutingTest {
         HttpResponse<String> appJsFromAsset = send(client, "/app.js");
         assertEquals(200, appJsFromAsset.statusCode());
         assertTrue(appJsFromAsset.body().contains("'order-input': '/home'"));
+        assertTrue(appJsFromAsset.body().contains("'session-profiles': '/session-profiles'"));
+        assertTrue(appJsFromAsset.body().contains("about: '/about'"));
         assertTrue(appJsFromAsset.body().contains("case '/neworder':"));
+        assertTrue(appJsFromAsset.body().contains("case '/session-profiles':"));
+        assertTrue(appJsFromAsset.body().contains("case '/about':"));
         assertTrue(appJsFromAsset.body().contains("'hsbc-dark'"));
         assertTrue(appJsFromAsset.body().contains("Dark - Green"));
         assertTrue(appJsFromAsset.body().contains("toggleThemeMenu"));
@@ -70,6 +74,11 @@ class TheFixClientServerRoutingTest {
         assertTrue(appJsFromAsset.body().contains("READY_PENDING_CONNECTION"));
         assertTrue(appJsFromAsset.body().contains("reconcileSessionActionPending"));
         assertTrue(appJsFromAsset.body().contains("shouldKeepConnectPending"));
+        assertTrue(appJsFromAsset.body().contains("selectedProfileQuery"));
+        assertTrue(appJsFromAsset.body().contains("withSelectedProfile"));
+        assertTrue(appJsFromAsset.body().contains("runtimeSessions"));
+        assertTrue(appJsFromAsset.body().contains("runtime-roster"));
+        assertTrue(appJsFromAsset.body().contains("toggleRuntimeSession"));
         assertTrue(appJsFromAsset.body().contains("syncFieldValuesToRawFixDraft"));
         assertTrue(appJsFromAsset.body().contains("parseRawFixInputByDelimiter"));
         assertTrue(appJsFromAsset.body().contains("rawFixInputDraft"));
@@ -101,6 +110,13 @@ class TheFixClientServerRoutingTest {
         assertEquals(200, cancelOrder.statusCode());
         assertTrue(cancelOrder.body().contains("\"actionResult\""));
 
+        HttpResponse<String> deleteProfile = post(client, "/api/session-profiles/delete", """
+                {"name":"Default profile"}
+                """);
+        assertEquals(200, deleteProfile.statusCode());
+        assertTrue(deleteProfile.body().contains("\"actionResult\""));
+        assertTrue(deleteProfile.body().contains("delete-profile"));
+
         assertTrue(appJsFromAsset.body().contains("createApp({"));
 
         HttpResponse<String> trailingSlashRedirect = send(client, "/blotter/");
@@ -114,6 +130,14 @@ class TheFixClientServerRoutingTest {
         HttpResponse<String> newOrderTrailingSlashRedirect = send(client, "/neworder/");
         assertEquals(308, newOrderTrailingSlashRedirect.statusCode());
         assertEquals("/neworder", newOrderTrailingSlashRedirect.headers().firstValue("location").orElse(""));
+
+        HttpResponse<String> sessionProfilesTrailingSlashRedirect = send(client, "/session-profiles/");
+        assertEquals(308, sessionProfilesTrailingSlashRedirect.statusCode());
+        assertEquals("/session-profiles", sessionProfilesTrailingSlashRedirect.headers().firstValue("location").orElse(""));
+
+        HttpResponse<String> aboutTrailingSlashRedirect = send(client, "/about/");
+        assertEquals(308, aboutTrailingSlashRedirect.statusCode());
+        assertEquals("/about", aboutTrailingSlashRedirect.headers().firstValue("location").orElse(""));
 
         HttpResponse<String> missingAsset = send(client, "/missing-does-not-exist.js");
         assertEquals(404, missingAsset.statusCode());

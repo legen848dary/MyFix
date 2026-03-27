@@ -56,6 +56,42 @@ class TheFixSessionProfileStoreTest {
     }
 
     @Test
+    void storeCanRenameAndDeleteProfilesWhileKeepingOneAvailable() {
+        TheFixSessionProfileStore store = new TheFixSessionProfileStore(testConfig());
+        store.updateStoragePath(tempDir.toString());
+        store.saveProfile(new JsonObject()
+                .put("name", "LDN session")
+                .put("senderCompId", "THEFIX_LDN01")
+                .put("targetCompId", "LLEXSIM")
+                .put("fixHost", "127.0.0.1")
+                .put("fixPort", 9880)
+                .put("fixVersionCode", "FIX_44")
+                .put("activate", false));
+
+        store.saveProfile(new JsonObject()
+                .put("originalName", "LDN session")
+                .put("name", "LDN session 2")
+                .put("senderCompId", "THEFIX_LDN02")
+                .put("targetCompId", "LLEXSIM")
+                .put("fixHost", "127.0.0.2")
+                .put("fixPort", 9988)
+                .put("fixVersionCode", "FIX_44")
+                .put("activate", false));
+
+        JsonObject renamedSnapshot = store.snapshot();
+        assertFalse(renamedSnapshot.getJsonArray("profiles").stream()
+                .map(JsonObject.class::cast)
+                .anyMatch(profile -> "LDN session".equals(profile.getString("name"))));
+        assertTrue(renamedSnapshot.getJsonArray("profiles").stream()
+                .map(JsonObject.class::cast)
+                .anyMatch(profile -> "LDN session 2".equals(profile.getString("name"))));
+
+        assertTrue(store.deleteProfile("LDN session 2"));
+        assertFalse(store.deleteProfile("Default profile"));
+        assertEquals(1, store.snapshot().getJsonArray("profiles").size());
+    }
+
+    @Test
     void defaultStorageIsIsolatedPerConfiguredQuickFixDirectory() {
         TheFixClientConfig firstConfig = new TheFixClientConfig(
                 "0.0.0.0",

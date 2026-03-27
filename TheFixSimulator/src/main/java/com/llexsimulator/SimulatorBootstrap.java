@@ -48,6 +48,7 @@ public final class SimulatorBootstrap {
     private DisruptorPipeline  disruptorPipeline;
     private WebServer          webServer;
     private MetricsSubscriber  metricsSubscriber;
+    private Thread             metricsSubscriberThread;
     private FixEngineManager   fixEngineManager;
 
     public void start() throws Exception {
@@ -102,7 +103,8 @@ public final class SimulatorBootstrap {
             metricsSubscriber = new MetricsSubscriber(
                     aeronContext, webServer.getBroadcaster(), webServer.getVertx(),
                     metricsRegistry, config.metricsAeronChannel());
-            Thread.ofVirtual().name("metrics-subscriber").start(metricsSubscriber);
+            metricsSubscriberThread = Thread.ofVirtual().name("metrics-subscriber").unstarted(metricsSubscriber);
+            metricsSubscriberThread.start();
         } else {
             log.info("Benchmark mode enabled — live Aeron/WebSocket metrics publishing is disabled");
         }
@@ -121,12 +123,76 @@ public final class SimulatorBootstrap {
 
     public void stop() {
         log.info("=== LLExSimulator shutting down ===");
-        try { if (fixEngineManager   != null) fixEngineManager.stop();      } catch (Exception e) { log.error("FIX engine stop error", e); }
-        try { if (metricsSubscriber  != null) metricsSubscriber.stop();     } catch (Exception e) { log.error("MetricsSubscriber stop error", e); }
-        try { if (webServer          != null) webServer.stop();             } catch (Exception e) { log.error("WebServer stop error", e); }
-        try { if (disruptorPipeline  != null) disruptorPipeline.shutdown(); } catch (Exception e) { log.error("Disruptor stop error", e); }
-        try { if (metricsPublisher   != null) metricsPublisher.close();     } catch (Exception e) { log.error("MetricsPublisher stop error", e); }
-        try { if (aeronContext       != null) aeronContext.close();         } catch (Exception e) { log.error("Aeron stop error", e); }
+        try {
+            if (fixEngineManager != null) {
+                fixEngineManager.stop();
+            }
+        } catch (Exception e) {
+            log.error("FIX engine stop error", e);
+        } finally {
+            fixEngineManager = null;
+        }
+
+        try {
+            if (metricsSubscriber != null) {
+                metricsSubscriber.stop();
+            }
+            if (metricsSubscriberThread != null) {
+                metricsSubscriberThread.join(2_000L);
+                if (metricsSubscriberThread.isAlive()) {
+                    metricsSubscriberThread.interrupt();
+                    metricsSubscriberThread.join(2_000L);
+                }
+            }
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            log.warn("Interrupted while waiting for metrics subscriber shutdown", interruptedException);
+        } catch (Exception e) {
+            log.error("MetricsSubscriber stop error", e);
+        } finally {
+            metricsSubscriber = null;
+            metricsSubscriberThread = null;
+        }
+
+        try {
+            if (webServer != null) {
+                webServer.stop();
+            }
+        } catch (Exception e) {
+            log.error("WebServer stop error", e);
+        } finally {
+            webServer = null;
+        }
+
+        try {
+            if (disruptorPipeline != null) {
+                disruptorPipeline.shutdown();
+            }
+        } catch (Exception e) {
+            log.error("Disruptor stop error", e);
+        } finally {
+            disruptorPipeline = null;
+        }
+
+        try {
+            if (metricsPublisher != null) {
+                metricsPublisher.close();
+            }
+        } catch (Exception e) {
+            log.error("MetricsPublisher stop error", e);
+        } finally {
+            metricsPublisher = null;
+        }
+
+        try {
+            if (aeronContext != null) {
+                aeronContext.close();
+            }
+        } catch (Exception e) {
+            log.error("Aeron stop error", e);
+        } finally {
+            aeronContext = null;
+        }
         log.info("=== LLExSimulator stopped ===");
     }
 }

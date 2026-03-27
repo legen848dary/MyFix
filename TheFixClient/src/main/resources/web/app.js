@@ -13,18 +13,60 @@ const REFRESH_FREQUENCY_STORAGE_KEY = 'thefixclient-refresh-frequency'
 const DEFAULT_REFRESH_SECONDS = 3
 const REFRESH_FREQUENCY_OPTIONS = Object.freeze([1, 3, 5])
 const PAGE_OPTIONS = [
-  { code: 'order-input', label: 'Create FIX message' },
+  { code: 'order-input', label: 'Create Order' },
   { code: 'order-blotter', label: 'My Orders' },
-  { code: 'fix-messages', label: 'Fix Sent/Received' },
-  { code: 'settings', label: 'Settings' }
+  { code: 'fix-messages', label: 'Fix In/Out' }
 ]
 
 const PAGE_PATHS = Object.freeze({
   'order-input': '/home',
   'order-blotter': '/orders',
   'fix-messages': '/recentfixmsgs',
+  'session-profiles': '/session-profiles',
+  about: '/about',
   settings: '/settings'
 })
+
+const ABOUT_COMPONENTS = Object.freeze([
+  {
+    title: 'Web workstation shell',
+    summary: 'Vue 3 single-page operator UI served from TheFixClient static resources.',
+    bullets: ['Desktop-style top menu', 'Session-aware order entry, blotter, and FIX tape', 'Right-side session control rail with per-profile actions']
+  },
+  {
+    title: 'TheFixClient server',
+    summary: 'Vert.x HTTP server that serves the SPA and exposes workstation APIs.',
+    bullets: ['SPA route handling for clean URLs', 'JSON endpoints for overview, profiles, templates, and orders', 'Bridges browser actions to workbench state']
+  },
+  {
+    title: 'Workbench state',
+    summary: 'Central orchestration layer for session profiles, runtime selection, and workstation snapshots.',
+    bullets: ['Builds the overview payload', 'Coordinates profile storage and template storage', 'Targets one runtime per selected FIX profile']
+  },
+  {
+    title: 'FIX runtime services',
+    summary: 'QuickFIX/J initiator services, one runtime instance per active session profile.',
+    bullets: ['Connect/disconnect/reconnect lifecycle', 'Order routing and bulk flow control', 'Recent events, blotter state, and raw FIX message capture']
+  },
+  {
+    title: 'Session profile store',
+    summary: 'Persistent store for named FIX connectivity profiles.',
+    bullets: ['Default profile seeding', 'Rename, activate, and delete support', 'Workspace storage-path awareness']
+  },
+  {
+    title: 'Simulator integration',
+    summary: 'TheFixClient connects to TheFixSimulator for end-to-end FIX workflow testing.',
+    bullets: ['Simulator web UI on port 8080', 'Client web UI on port 8081', 'FIX acceptor on localhost:9880 by default']
+  }
+])
+
+const ABOUT_CAPABILITIES = Object.freeze([
+  'Create and preview FIX messages before routing.',
+  'Run profile-targeted multi-session workflows from one workstation.',
+  'Inspect recent orders and recent sent/received FIX traffic.',
+  'Manage saved session profiles, templates, and workspace preferences.',
+  'Drive TheFixSimulator from a browser-first FIX operator surface.'
+])
 
 function normalizePagePath(pathname) {
   if (!pathname || pathname === '/') {
@@ -47,6 +89,11 @@ function pageCodeFromPath(pathname) {
       return 'order-blotter'
     case '/recentfixmsgs':
       return 'fix-messages'
+    case '/session-profiles':
+    case '/sessionprofiles':
+      return 'session-profiles'
+    case '/about':
+      return 'about'
     case '/settings':
       return 'settings'
     default:
@@ -111,6 +158,21 @@ const FIX_TAG_LABELS = Object.freeze({
   '423': 'PriceType'
 })
 
+const FIX_FORM_FIELD_TAGS = Object.freeze({
+  messageType: '35',
+  clOrdId: '11',
+  origClOrdId: '41',
+  symbol: '55',
+  side: '54',
+  quantity: '38',
+  orderType: '40',
+  timeInForce: '59',
+  priceType: '423',
+  currency: '15',
+  price: '44',
+  stopPrice: '99'
+})
+
 const SIDE_TO_FIX = Object.freeze({ BUY: '1', SELL: '2', SELL_SHORT: '5' })
 const FIX_TO_SIDE = Object.freeze({ '1': 'BUY', '2': 'SELL', '5': 'SELL_SHORT' })
 const ORDER_TYPE_TO_FIX = Object.freeze({
@@ -131,72 +193,103 @@ const FIX_TO_PRICE_TYPE = Object.freeze(Object.fromEntries(Object.entries(PRICE_
 createApp({
   template: `
     <div class="shell">
+      <nav class="desktop-menubar" aria-label="Desktop workstation menu">
+        <div class="desktop-menubar__group">
+          <div class="desktop-menu">
+            <button class="desktop-menu__button" :class="{ 'desktop-menu__button--open': desktopMenuOpen === 'views' }" @click.stop="toggleDesktopMenu('views')">
+              <span class="desktop-menu__button-icon" aria-hidden="true">▣</span>
+              <span class="desktop-menu__button-label">Views</span>
+            </button>
+            <div v-if="desktopMenuOpen === 'views'" class="desktop-menu__panel">
+              <div class="desktop-menu__section">
+                <p class="desktop-menu__section-title">Workspace</p>
+                <button v-for="page in pageOptions" :key="'views-' + page.code" class="desktop-menu__item" @click="openPage(page.code)">
+                  <span class="desktop-menu__item-label">{{ page.label }}</span>
+                  <span class="desktop-menu__item-meta" v-if="activePage === page.code">Open</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="desktop-menu">
+            <button class="desktop-menu__button" :class="{ 'desktop-menu__button--open': desktopMenuOpen === 'help' }" @click.stop="toggleDesktopMenu('help')">
+              <span class="desktop-menu__button-icon" aria-hidden="true">?</span>
+              <span class="desktop-menu__button-label">Help</span>
+            </button>
+            <div v-if="desktopMenuOpen === 'help'" class="desktop-menu__panel">
+              <div class="desktop-menu__section">
+                <p class="desktop-menu__section-title">About</p>
+                <button class="desktop-menu__item" @click="openPage('about')">
+                  <span class="desktop-menu__item-label">About TheFixClient</span>
+                  <span class="desktop-menu__item-meta">About</span>
+                </button>
+              </div>
+              <div class="desktop-menu__section">
+                <p class="desktop-menu__section-title">Workspace</p>
+                <button class="desktop-menu__item" @click="openPage('session-profiles')">
+                  <span class="desktop-menu__item-label">Session Profiles</span>
+                  <span class="desktop-menu__item-meta">Profiles</span>
+                </button>
+                <button class="desktop-menu__item" @click="openPage('settings')">
+                  <span class="desktop-menu__item-label">Settings</span>
+                  <span class="desktop-menu__item-meta">Workspace</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="desktop-menubar__status">
+          <div class="desktop-nav" aria-label="Workspace navigation">
+            <button class="desktop-nav__button" type="button" aria-label="Go back" title="Back" @click="goBack">
+              <span aria-hidden="true">←</span>
+              <span class="desktop-nav__label">Back</span>
+            </button>
+            <button class="desktop-nav__button" type="button" aria-label="Go forward" title="Forward" @click="goForward">
+              <span aria-hidden="true">→</span>
+              <span class="desktop-nav__label">Forward</span>
+            </button>
+            <button class="desktop-nav__button desktop-nav__button--home" type="button" aria-label="Go home" title="Home" @click="goHome">
+              <span aria-hidden="true">⌂</span>
+              <span>Home</span>
+            </button>
+          </div>
+          <div class="desktop-menu">
+            <button class="desktop-menu__button" :class="{ 'desktop-menu__button--open': desktopMenuOpen === 'display' }" @click.stop="toggleDesktopMenu('display')">
+              <span class="desktop-menu__button-icon" aria-hidden="true">◐</span>
+              <span class="desktop-menu__button-label">Display</span>
+            </button>
+            <div v-if="desktopMenuOpen === 'display'" class="desktop-menu__panel desktop-menu__panel--wide">
+              <div class="desktop-menu__section">
+                <p class="desktop-menu__section-title">Theme</p>
+                <button v-for="option in themeChoices" :key="'display-theme-' + option.value" class="desktop-menu__item" @click="selectTheme(option.value)">
+                  <span class="desktop-menu__item-label">{{ option.label }}</span>
+                  <span class="desktop-menu__item-meta" v-if="theme === option.value">Active</span>
+                </button>
+              </div>
+              <div class="desktop-menu__section">
+                <p class="desktop-menu__section-title">Refresh</p>
+                <button v-for="seconds in refreshFrequencyOptions" :key="'display-refresh-' + seconds" class="desktop-menu__item" @click="selectRefreshFrequency(seconds)">
+                  <span class="desktop-menu__item-label">{{ refreshFrequencyLabel(seconds) }}</span>
+                  <span class="desktop-menu__item-meta" v-if="activeRefreshSeconds === seconds">Active</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </nav>
+
       <header class="topbar">
         <div class="brand">
           <div class="brand__mark">TF</div>
           <div>
             <p class="brand__eyebrow">Order workstation</p>
             <h1 class="brand__title">{{ overview.applicationName || 'TheFixClient' }}</h1>
+            <p class="brand__subtitle">Command the full FIX journey from one deck — compose, launch, and track every order in motion.</p>
           </div>
         </div>
 
         <div class="topbar__actions">
-          <div class="topbar__controls">
-            <div class="menu-wrap">
-              <button class="menu-button" :aria-expanded="menuOpen ? 'true' : 'false'" @click.stop="toggleMenu">
-                <span class="menu-button__label">Menu</span>
-                <span class="menu-button__value">{{ currentPageLabel }}</span>
-                <span class="menu-button__caret" :class="{ 'menu-button__caret--open': menuOpen }">▾</span>
-              </button>
-              <div v-if="menuOpen" class="menu-panel">
-                <button
-                  v-for="page in pageOptions"
-                  :key="page.code"
-                  class="menu-panel__item"
-                  :class="{ 'menu-panel__item--active': activePage === page.code }"
-                  @click="openPage(page.code)">
-                  {{ page.label }}
-                </button>
-              </div>
-            </div>
-
-            <div class="menu-wrap">
-              <button class="menu-button" :aria-expanded="themeMenuOpen ? 'true' : 'false'" @click.stop="toggleThemeMenu">
-                <span class="menu-button__label">Theme</span>
-                <span class="menu-button__value">{{ currentThemeLabel }}</span>
-                <span class="menu-button__caret" :class="{ 'menu-button__caret--open': themeMenuOpen }">▾</span>
-              </button>
-              <div v-if="themeMenuOpen" class="menu-panel">
-                <button
-                  v-for="option in themeChoices"
-                  :key="option.value"
-                  class="menu-panel__item"
-                  :class="{ 'menu-panel__item--active': theme === option.value }"
-                  @click="selectTheme(option.value)">
-                  {{ option.label }}
-                </button>
-              </div>
-            </div>
-
-            <div class="menu-wrap">
-              <button class="menu-button" :aria-expanded="refreshMenuOpen ? 'true' : 'false'" @click.stop="toggleRefreshMenu">
-                <span class="menu-button__label">Refresh every</span>
-                <span class="menu-button__value">{{ currentRefreshFrequencyLabel }}</span>
-                <span class="menu-button__caret" :class="{ 'menu-button__caret--open': refreshMenuOpen }">▾</span>
-              </button>
-              <div v-if="refreshMenuOpen" class="menu-panel">
-                <button
-                  v-for="seconds in refreshFrequencyOptions"
-                  :key="seconds"
-                  class="menu-panel__item"
-                  :class="{ 'menu-panel__item--active': activeRefreshSeconds === seconds }"
-                  @click="selectRefreshFrequency(seconds)">
-                  {{ refreshFrequencyLabel(seconds) }}
-                </button>
-              </div>
-            </div>
-          </div>
-
           <div class="status-indicator" :class="session.connected ? 'status-indicator--live' : 'status-indicator--warn'">
             <span class="status-indicator__dot"></span>
             <span>{{ session.connected ? 'FIX LIVE' : 'FIX IDLE' }}</span>
@@ -219,48 +312,68 @@ createApp({
             </div>
             <div class="panel__body panel__body--metrics">
               <div class="metrics-strip metrics-strip--compact">
-                <div class="compact-card compact-card--metric-tile">
-                  <p class="eyebrow">Ready</p>
-                  <p class="compact-card__value">{{ kpis.readyState }}</p>
-                  <p class="compact-card__copy">{{ kpis.sessionUptime }}</p>
+                <div class="compact-card compact-card--metric-tile compact-card--metric-inline">
+                  <span class="compact-card__metric-label">Ready</span>
+                  <span class="compact-card__metric-value">{{ kpis.readyState }}</span>
                 </div>
-                <div class="compact-card compact-card--metric-tile">
-                  <p class="eyebrow">Sent</p>
-                  <p class="compact-card__value">{{ kpis.sentOrders }}</p>
-                  <p class="compact-card__copy">Orders</p>
+                <div class="compact-card compact-card--metric-tile compact-card--metric-inline">
+                  <span class="compact-card__metric-label">Sent</span>
+                  <span class="compact-card__metric-value">{{ kpis.sentOrders }}</span>
                 </div>
-                <div class="compact-card compact-card--metric-tile">
-                  <p class="eyebrow">Exec</p>
-                  <p class="compact-card__value">{{ kpis.executionReports }}</p>
-                  <p class="compact-card__copy">Reports</p>
+                <div class="compact-card compact-card--metric-tile compact-card--metric-inline">
+                  <span class="compact-card__metric-label">Exec</span>
+                  <span class="compact-card__metric-value">{{ kpis.executionReports }}</span>
                 </div>
-                <div class="compact-card compact-card--metric-tile">
-                  <p class="eyebrow">Reject/Cancel</p>
-                  <p class="compact-card__value">{{ kpis.rejects }} / {{ kpis.sendFailures }}</p>
-                  <p class="compact-card__copy">Count</p>
+                <div class="compact-card compact-card--metric-tile compact-card--metric-inline">
+                  <span class="compact-card__metric-label">Cancels</span>
+                  <span class="compact-card__metric-value">{{ kpis.cancels }}</span>
+                </div>
+                <div class="compact-card compact-card--metric-tile compact-card--metric-inline">
+                  <span class="compact-card__metric-label">Reject/Fail</span>
+                  <span class="compact-card__metric-value">{{ kpis.rejects }} / {{ kpis.sendFailures }}</span>
                 </div>
               </div>
             </div>
           </article>
 
           <article class="panel panel--focus">
-            <div class="panel__header">
-              <div>
-                <h2 class="panel__title">Create FIX message</h2>
-                <p class="panel__copy">Build live FIX messages with version-aware tags, custom FIDs, and bulk NOS routing from one operator surface.</p>
-              </div>
-                  <div class="chip-row panel-header__actions">
-                <button
-                  v-if="activeMode === 'single'"
-                  class="button button--soft"
-                  @click="toggleSingleMessageViewMode">
-                  {{ singleMessageViewMode === 'fields' ? 'Switch to Raw FIX view' : 'Switch to Field view' }}
-                </button>
+            <div class="composer-strip">
+              <div class="composer-strip__info">
+                <span class="composer-strip__title">Create Order</span>
+                <span class="chip">{{ activeMode === 'single' ? 'Single message' : 'Bulk NOS' }}</span>
+                <span class="chip">{{ activeMode === 'single' ? (singleMessageViewMode === 'fields' ? 'Field view' : 'Raw FIX view') : 'Bulk flow view' }}</span>
+                <span class="chip">{{ activeFixVersionLabel }}</span>
                 <span class="chip">{{ previewStatusLabel }}</span>
               </div>
             </div>
 
             <div class="workflow-toolbar">
+              <div class="workflow-toolbar__row workflow-toolbar__row--actions">
+                <div class="tab-bar tab-bar--inline">
+                  <button class="tab" :class="{ 'tab--active': activeMode === 'single' }" @click="activeMode = 'single'">Single Message</button>
+                  <button class="tab" :class="{ 'tab--active': activeMode === 'bulk' }" @click="activeMode = 'bulk'">Bulk NOS</button>
+                </div>
+                <div class="workflow-toolbar__actions">
+                  <template v-if="activeMode === 'single'">
+                    <button class="button button--soft" @click="saveCurrentTemplate" :disabled="busyAction === 'save-template'">
+                      {{ busyAction === 'save-template' ? 'Saving…' : 'Save template' }}
+                    </button>
+                    <button class="button button--soft composer-strip__toggle" @click="toggleSingleMessageViewMode">
+                      {{ singleMessageViewMode === 'fields' ? 'Raw FIX view' : 'Field view' }}
+                    </button>
+                    <button class="button button--primary" @click="sendTicket" :disabled="busyAction === 'send'">Send message</button>
+                  </template>
+                  <template v-else-if="selectedMessageType?.supportsBulk">
+                    <button class="button" :class="bulkFlowStartButtonClass" @click="startBulkFlow" :disabled="!canStartBulkFlow || busyAction === 'flow-start'">
+                      {{ busyAction === 'flow-start' ? 'Starting…' : (session.autoFlowActive ? 'Bulk flow running' : 'Start bulk flow') }}
+                    </button>
+                    <button class="button" :class="bulkFlowStopButtonClass" @click="stopBulkFlow" :disabled="!canStopBulkFlow || busyAction === 'flow-stop'">
+                      {{ busyAction === 'flow-stop' ? 'Stopping…' : 'Stop bulk flow' }}
+                    </button>
+                  </template>
+                  <span v-else class="chip">Bulk flow supports NOS only</span>
+                </div>
+              </div>
               <div class="workflow-toolbar__row workflow-toolbar__row--templates">
                 <div class="workflow-toolbar__templates">
                   <label class="template-picker" aria-label="Saved FIX message templates">
@@ -272,32 +385,11 @@ createApp({
                       </option>
                     </select>
                   </label>
-                  <div class="field field--template-name">
-                    <span class="field__label">Template name</span>
-                    <input v-model="templateNameDraft" placeholder="Growth buy USD limit" />
-                  </div>
-                  <button class="button button--soft" @click="saveCurrentTemplate" :disabled="busyAction === 'save-template'">
-                    {{ busyAction === 'save-template' ? 'Saving…' : 'Save template' }}
-                  </button>
-                </div>
-              </div>
-              <div class="workflow-toolbar__row workflow-toolbar__row--actions">
-                <div class="tab-bar tab-bar--inline">
-                  <button class="tab" :class="{ 'tab--active': activeMode === 'single' }" @click="activeMode = 'single'">Single Message</button>
-                  <button class="tab" :class="{ 'tab--active': activeMode === 'bulk' }" @click="activeMode = 'bulk'">Bulk NOS</button>
-                </div>
-                <div class="workflow-toolbar__actions">
-                  <button v-if="activeMode === 'single'" class="button button--primary" @click="sendTicket" :disabled="busyAction === 'send'">Send FIX message</button>
-                  <template v-else-if="selectedMessageType?.supportsBulk">
-                    <button class="button button--primary" @click="startBulkFlow" :disabled="busyAction === 'flow-start'">Start bulk flow</button>
-                    <button class="button button--ghost" @click="stopBulkFlow" :disabled="busyAction === 'flow-stop'">Stop bulk flow</button>
-                  </template>
-                  <span v-else class="chip">Bulk flow supports NOS only</span>
                 </div>
               </div>
             </div>
 
-            <div class="panel__body">
+            <div class="panel__body panel__body--composer">
               <div v-if="activeMode === 'single' && singleMessageViewMode === 'raw'" class="single-message-workspace">
                 <div class="single-message-workspace__topbar">
                   <div>
@@ -333,17 +425,17 @@ createApp({
 
               <div v-if="activeMode === 'single' && singleMessageViewMode === 'fields'" class="order-grid order-grid--comfortable order-grid--trade-ticket">
                 <div class="field field--trade-ticket">
-                  <span class="field__label">Message type</span>
+                  <span class="field__label">{{ fixFieldLabel('messageType', 'Message type') }}</span>
                   <select v-model="orderDraft.messageType">
                     <option v-for="messageType in messageTypes" :key="messageType.code" :value="messageType.code">{{ messageType.label }}</option>
                   </select>
                 </div>
                 <div class="field field--trade-ticket">
-                  <span class="field__label">ClOrdID</span>
+                  <span class="field__label">{{ fixFieldLabel('clOrdId', 'ClOrdID') }}</span>
                   <input v-model="orderDraft.clOrdId" placeholder="Auto-generated if blank" />
                 </div>
                 <div v-if="selectedMessageType?.requiresOrigClOrdId" class="field field--trade-ticket">
-                  <span class="field__label">OrigClOrdID</span>
+                  <span class="field__label">{{ fixFieldLabel('origClOrdId', 'OrigClOrdID') }}</span>
                   <input v-model="orderDraft.origClOrdId" placeholder="Existing ClOrdID to amend/cancel" />
                 </div>
                 <div class="field field--trade-ticket">
@@ -359,47 +451,47 @@ createApp({
                   </select>
                 </div>
                 <div class="field field--trade-ticket">
-                  <span class="field__label">Symbol</span>
+                  <span class="field__label">{{ fixFieldLabel('symbol', 'Symbol') }}</span>
                   <input v-model="orderDraft.symbol" placeholder="AAPL" />
                 </div>
                 <div class="field field--trade-ticket">
-                  <span class="field__label">Side</span>
+                  <span class="field__label">{{ fixFieldLabel('side', 'Side') }}</span>
                   <select v-model="orderDraft.side">
                     <option v-for="side in sides" :key="side.code" :value="side.code">{{ side.label }}</option>
                   </select>
                 </div>
                 <div class="field field--trade-ticket">
-                  <span class="field__label">Quantity</span>
+                  <span class="field__label">{{ fixFieldLabel('quantity', 'Quantity') }}</span>
                   <input v-model.number="orderDraft.quantity" type="number" min="0" step="1" />
                 </div>
                 <div v-if="orderDraft.messageType !== 'ORDER_CANCEL_REQUEST'" class="field field--trade-ticket">
-                  <span class="field__label">Order type</span>
+                  <span class="field__label">{{ fixFieldLabel('orderType', 'Order type') }}</span>
                   <select v-model="orderDraft.orderType">
                     <option v-for="orderType in orderTypes" :key="orderType.code" :value="orderType.code">{{ orderType.label }}</option>
                   </select>
                 </div>
                 <div v-if="orderDraft.messageType !== 'ORDER_CANCEL_REQUEST'" class="field field--trade-ticket">
-                  <span class="field__label">Time in force</span>
+                  <span class="field__label">{{ fixFieldLabel('timeInForce', 'Time in force') }}</span>
                   <select v-model="orderDraft.timeInForce">
                     <option v-for="tif in timeInForces" :key="tif.code" :value="tif.code">{{ tif.label }}</option>
                   </select>
                 </div>
                 <div v-if="orderDraft.messageType !== 'ORDER_CANCEL_REQUEST'" class="field field--trade-ticket">
-                  <span class="field__label">Price type</span>
+                  <span class="field__label">{{ fixFieldLabel('priceType', 'Price type') }}</span>
                   <select v-model="orderDraft.priceType">
                     <option v-for="priceType in priceTypes" :key="priceType.code" :value="priceType.code">{{ priceType.label }}</option>
                   </select>
                 </div>
                 <div class="field field--trade-ticket">
-                  <span class="field__label">Currency</span>
+                  <span class="field__label">{{ fixFieldLabel('currency', 'Currency') }}</span>
                   <input v-model="orderDraft.currency" maxlength="3" />
                 </div>
                 <div v-if="orderDraft.messageType !== 'ORDER_CANCEL_REQUEST'" class="field field--trade-ticket">
-                  <span class="field__label">{{ needsLimitPrice ? 'Limit price' : 'Reference price' }}</span>
+                  <span class="field__label">{{ fixFieldLabel('price', needsLimitPrice ? 'Limit price' : 'Reference price') }}</span>
                   <input v-model.number="orderDraft.price" type="number" min="0" step="0.01" />
                 </div>
                 <div class="field field--trade-ticket" v-if="orderDraft.messageType !== 'ORDER_CANCEL_REQUEST' && needsStopPrice">
-                  <span class="field__label">Stop price</span>
+                  <span class="field__label">{{ fixFieldLabel('stopPrice', 'Stop price') }}</span>
                   <input v-model.number="orderDraft.stopPrice" type="number" min="0" step="0.01" />
                 </div>
                 <div class="field field--span-2">
@@ -446,39 +538,65 @@ createApp({
                 </div>
               </div>
 
-              <div v-if="activeMode === 'bulk' && selectedMessageType?.supportsBulk" class="bulk-grid bulk-grid--comfortable" style="margin-top: 18px;">
-                <div class="field field--span-2">
-                  <span class="field__label">Bulk mode</span>
-                  <div class="segmented">
-                    <button
-                      v-for="mode in bulkModes"
-                      :key="mode.code"
-                      class="segmented__option"
-                      :class="{ 'segmented__option--active': bulkDraft.bulkMode === mode.code }"
-                      @click="bulkDraft.bulkMode = mode.code">
-                      {{ mode.label }}
-                    </button>
-                  </div>
-                  <span class="field__hint">{{ activeBulkMode?.description || 'Choose how the workstation should schedule the bulk run.' }}</span>
-                </div>
-                <div class="field">
-                  <span class="field__label">Total orders</span>
-                  <input v-model.number="bulkDraft.totalOrders" type="number" min="0" step="1" />
-                </div>
-                <div class="field" v-if="bulkDraft.bulkMode === 'FIXED_RATE'">
-                  <span class="field__label">Rate per second</span>
-                  <input v-model.number="bulkDraft.ratePerSecond" type="number" min="1" step="1" />
-                </div>
-                <template v-else>
-                  <div class="field">
-                    <span class="field__label">Burst size</span>
-                    <input v-model.number="bulkDraft.burstSize" type="number" min="1" step="1" />
+              <div v-if="activeMode === 'bulk' && selectedMessageType?.supportsBulk" class="stack" style="margin-top: 18px; gap: 18px;">
+                <div class="bulk-grid bulk-grid--comfortable">
+                  <div class="field field--span-2">
+                    <span class="field__label">Bulk mode</span>
+                    <div class="segmented">
+                      <button
+                        v-for="mode in bulkModes"
+                        :key="mode.code"
+                        class="segmented__option"
+                        :class="{ 'segmented__option--active': bulkDraft.bulkMode === mode.code }"
+                        @click="bulkDraft.bulkMode = mode.code">
+                        {{ mode.label }}
+                      </button>
+                    </div>
+                    <span class="field__hint">{{ activeBulkMode?.description || 'Choose how the workstation should schedule the bulk run.' }}</span>
                   </div>
                   <div class="field">
-                    <span class="field__label">Burst interval (ms)</span>
-                    <input v-model.number="bulkDraft.burstIntervalMs" type="number" min="1" step="50" />
+                    <span class="field__label">Total orders</span>
+                    <input v-model.number="bulkDraft.totalOrders" type="number" min="0" step="1" />
                   </div>
-                </template>
+                  <div class="field" v-if="bulkDraft.bulkMode === 'FIXED_RATE'">
+                    <span class="field__label">Rate per second</span>
+                    <input v-model.number="bulkDraft.ratePerSecond" type="number" min="1" step="1" />
+                  </div>
+                  <template v-else>
+                    <div class="field">
+                      <span class="field__label">Burst size</span>
+                      <input v-model.number="bulkDraft.burstSize" type="number" min="1" step="1" />
+                    </div>
+                    <div class="field">
+                      <span class="field__label">Burst interval (ms)</span>
+                      <input v-model.number="bulkDraft.burstIntervalMs" type="number" min="1" step="50" />
+                    </div>
+                  </template>
+                </div>
+
+                <div class="compact-card bulk-fields-card">
+                  <div class="bulk-fields-card__header">
+                    <div>
+                      <p class="eyebrow">Bulk FIX fields</p>
+                      <p class="compact-card__copy">Keep region and market fixed for the run. Symbol, side, quantity, and pricing are randomized per outbound NOS.</p>
+                    </div>
+                    <span class="chip" :class="session.autoFlowActive ? 'chip--success' : 'chip--neutral'">{{ session.autoFlowActive ? 'Bulk flow live' : 'Bulk flow ready' }}</span>
+                  </div>
+                  <div class="order-grid order-grid--comfortable" style="margin-top: 14px;">
+                    <div class="field">
+                      <span class="field__label">Region</span>
+                      <select v-model="orderDraft.region" @change="onRegionChange">
+                        <option v-for="region in regions" :key="'bulk-region-' + region.code" :value="region.code">{{ region.label }}</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <span class="field__label">Market</span>
+                      <select v-model="orderDraft.market" @change="onMarketChange">
+                        <option v-for="market in availableMarkets" :key="'bulk-market-' + market.code" :value="market.code">{{ market.label }} · {{ market.currency }}</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div v-else-if="activeMode === 'bulk'" class="compact-card" style="margin-top: 18px;">
@@ -493,48 +611,94 @@ createApp({
           </article>
         </section>
 
-        <aside class="stack">
+        <aside class="stack page-grid__aside">
           <article class="panel panel--compact">
             <div class="panel__header">
-              <div>
-                <h2 class="panel__title">Session Control</h2>
-                <p class="panel__copy">Connection controls and current FIX session profile.</p>
-              </div>
-              <span class="chip">{{ session.profileName || settingsState.activeProfileName }}</span>
+              <h2 class="panel__title">Session Control</h2>
+              <button class="button button--ghost session-control-panel__manage" @click="openPage('session-profiles')">Edit Profiles</button>
             </div>
-            <div class="panel__body compact-stack">
-              <div class="compact-card">
-                <p class="eyebrow">Session</p>
-                <p class="compact-card__value">{{ session.connected ? 'Connected' : 'Standby' }}</p>
-                <p class="compact-card__copy">{{ session.host }}:{{ session.port }} · {{ session.fixVersionLabel || session.beginString }}</p>
+            <div class="panel__body compact-stack session-control-rail">
+              <div v-if="sessionControlCards.length" class="session-control-rail__cards">
+                <article
+                  v-for="card in sessionControlCards"
+                  :key="card.profileName"
+                  class="runtime-session-card"
+                  :class="runtimeSessionCardClass(card)"
+                  role="button"
+                  tabindex="0"
+                  @click="loadSessionCard(card.profileName)"
+                  @keydown.enter.prevent="loadSessionCard(card.profileName)"
+                  @keydown.space.prevent="loadSessionCard(card.profileName)">
+                  <div class="runtime-session-card__header">
+                    <div>
+                      <p class="runtime-session-card__title">{{ card.profileName }}</p>
+                      <p class="runtime-session-card__meta">{{ card.host }}:{{ card.port }} · {{ card.fixVersionLabel }}</p>
+                    </div>
+                    <span class="chip" :class="runtimeSessionToneClass(card)">{{ card.status }}</span>
+                  </div>
+                  <div class="chip-row runtime-session-card__state">
+                    <span v-if="card.loaded" class="chip chip--success">Selected</span>
+                  </div>
+                  <div class="runtime-session-card__details mono">
+                    <span>{{ card.senderCompId }}</span>
+                    <span>→</span>
+                    <span>{{ card.targetCompId }}</span>
+                  </div>
+                  <p v-if="sessionControlCardCopy(card)" class="runtime-session-card__meta">{{ sessionControlCardCopy(card) }}</p>
+                  <div class="runtime-session-card__actions">
+                    <button class="button button--ghost" @click.stop="editSessionCard(card.profileName)">Edit</button>
+                    <button class="button button--ghost button--danger-outline" @click.stop="deleteSessionCard(card)" :disabled="!canDeleteSessionCard(card) || busyAction === 'delete-profile'">Delete</button>
+                    <button class="button" :class="runtimeSessionButtonClass(card)" @click.stop="toggleRuntimeSession(card)" :disabled="runtimeSessionButtonDisabled(card)">{{ runtimeSessionButtonLabel(card) }}</button>
+                  </div>
+                </article>
               </div>
-              <div class="compact-card">
-                <p class="eyebrow">Comp IDs</p>
-                <p class="compact-card__value mono">{{ session.senderCompId }} → {{ session.targetCompId }}</p>
-                <p class="compact-card__copy">{{ session.pendingProfileChange ? 'Reconnect required to apply selected profile.' : session.status }}</p>
-              </div>
-              <div class="compact-actions compact-actions--stacked">
-                <button
-                  class="button"
-                  :class="session.connected ? 'button--danger' : 'button--success'"
-                  @click="session.connected ? disconnectSession() : connectSession()"
-                  :disabled="sessionActionBusy">
-                  {{ sessionButtonLabel }}
-                </button>
+
+              <div v-else class="runtime-roster__empty">
+                No session profiles are available yet. Create one from Session Profiles to populate the card rail.
               </div>
             </div>
           </article>
         </aside>
       </main>
 
-      <main v-else-if="activePage === 'order-blotter'" class="workspace workspace--single">
+      <main v-else-if="activePage === 'order-blotter'" class="page-grid">
         <section class="stack">
           <article class="panel orders-panel">
             <div class="panel__header orders-panel__header">
               <div>
                 <h2 class="panel__title">My Orders</h2>
               </div>
-              <span class="orders-panel__count mono">{{ recentOrders.length }} recent</span>
+              <span class="orders-panel__count mono">{{ ordersCountLabel }}</span>
+            </div>
+            <div class="fix-messages-toolbar orders-toolbar">
+              <div class="fix-messages-toolbar__controls">
+                <label class="fix-messages-toolbar__label">
+                  <span>Page size</span>
+                  <select v-model.number="ordersLimit" class="fix-messages-toolbar__select">
+                    <option :value="10">10</option>
+                    <option :value="20">20</option>
+                    <option :value="40">40</option>
+                  </select>
+                </label>
+                <label class="fix-messages-toolbar__label fix-messages-toolbar__label--search">
+                  <span>Filter</span>
+                  <input v-model="ordersSearch" placeholder="Search orders…" class="fix-messages-toolbar__input" />
+                </label>
+                <label class="fix-messages-toolbar__label">
+                  <span>Status</span>
+                  <select v-model="ordersStatusFilter" class="fix-messages-toolbar__select">
+                    <option value="">All</option>
+                    <option v-for="status in orderStatusOptions" :key="'order-status-' + status" :value="status">{{ status }}</option>
+                  </select>
+                </label>
+                <label class="fix-messages-toolbar__label">
+                  <span>Source</span>
+                  <select v-model="ordersSourceFilter" class="fix-messages-toolbar__select">
+                    <option value="">All</option>
+                    <option v-for="source in orderSourceOptions" :key="'order-source-' + source" :value="source">{{ source }}</option>
+                  </select>
+                </label>
+              </div>
             </div>
             <div class="orders-table__scroll">
               <table class="orders-table orders-table--simulator">
@@ -547,13 +711,12 @@ createApp({
                       <th class="text-right">Price</th>
                       <th class="text-left">ExecType</th>
                       <th class="text-left">Status</th>
-                      <th class="text-left">Behavior</th>
                       <th class="text-right">ClOrdID</th>
                       <th class="text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="order in recentOrders"
+                    <tr v-for="order in paginatedRecentOrders"
                         :key="order.clOrdId"
                         :class="orderRowClass(order)">
                       <td class="mono text-slate-400">{{ order.time }}</td>
@@ -565,30 +728,83 @@ createApp({
                         <span class="exec-badge" :class="execTypeBadge(order.execType)">{{ order.execType }}</span>
                       </td>
                       <td :class="blotterStatusClass(order.status)">{{ order.status }}</td>
-                      <td :class="blotterSourceClass(order.source)">{{ order.source }}</td>
                       <td class="mono text-right text-slate-300">{{ order.clOrdId }}</td>
                       <td class="orders-table__actions">
                         <button class="button button--soft button--table" @click="openAmendModal(order)" :disabled="!order.canAmend || busyAction === 'order-amend'">Amend</button>
                         <button class="button button--ghost button--table button--danger-outline" @click="openCancelDialog(order)" :disabled="!order.canCancel || busyAction === 'order-cancel'">Cancel</button>
                       </td>
                     </tr>
-                    <tr v-if="!recentOrders.length">
-                      <td colspan="10" class="orders-table__empty">Waiting for orders…</td>
+                    <tr v-if="!paginatedRecentOrders.length">
+                      <td colspan="9" class="orders-table__empty">Waiting for orders…</td>
                     </tr>
                   </tbody>
                 </table>
             </div>
+            <div class="fix-messages-pagination">
+              <button class="button button--soft" :disabled="ordersOffset === 0" @click="ordersPrev">← Previous</button>
+              <span class="fix-messages-pagination__info mono">{{ ordersRangeStart }}–{{ ordersRangeEnd }} of {{ filteredOrdersTotal }}</span>
+              <button class="button button--soft" :disabled="ordersOffset + ordersLimit >= filteredOrdersTotal" @click="ordersNext">Next →</button>
+            </div>
           </article>
         </section>
+
+        <aside class="stack page-grid__aside">
+          <article class="panel panel--compact">
+            <div class="panel__header">
+              <h2 class="panel__title">Session Control</h2>
+              <button class="button button--ghost session-control-panel__manage" @click="openPage('session-profiles')">Edit Profiles</button>
+            </div>
+            <div class="panel__body compact-stack session-control-rail">
+              <div v-if="sessionControlCards.length" class="session-control-rail__cards">
+                <article
+                  v-for="card in sessionControlCards"
+                  :key="card.profileName"
+                  class="runtime-session-card"
+                  :class="runtimeSessionCardClass(card)"
+                  role="button"
+                  tabindex="0"
+                  @click="loadSessionCard(card.profileName)"
+                  @keydown.enter.prevent="loadSessionCard(card.profileName)"
+                  @keydown.space.prevent="loadSessionCard(card.profileName)">
+                  <div class="runtime-session-card__header">
+                    <div>
+                      <p class="runtime-session-card__title">{{ card.profileName }}</p>
+                      <p class="runtime-session-card__meta">{{ card.host }}:{{ card.port }} · {{ card.fixVersionLabel }}</p>
+                    </div>
+                    <span class="chip" :class="runtimeSessionToneClass(card)">{{ card.status }}</span>
+                  </div>
+                  <div class="chip-row runtime-session-card__state">
+                    <span v-if="card.loaded" class="chip chip--success">Selected</span>
+                  </div>
+                  <div class="runtime-session-card__details mono">
+                    <span>{{ card.senderCompId }}</span>
+                    <span>→</span>
+                    <span>{{ card.targetCompId }}</span>
+                  </div>
+                  <p v-if="sessionControlCardCopy(card)" class="runtime-session-card__meta">{{ sessionControlCardCopy(card) }}</p>
+                  <div class="runtime-session-card__actions">
+                    <button class="button button--ghost" @click.stop="editSessionCard(card.profileName)">Edit</button>
+                    <button class="button button--ghost button--danger-outline" @click.stop="deleteSessionCard(card)" :disabled="!canDeleteSessionCard(card) || busyAction === 'delete-profile'">Delete</button>
+                    <button class="button" :class="runtimeSessionButtonClass(card)" @click.stop="toggleRuntimeSession(card)" :disabled="runtimeSessionButtonDisabled(card)">{{ runtimeSessionButtonLabel(card) }}</button>
+                  </div>
+                </article>
+              </div>
+
+              <div v-else class="runtime-roster__empty">
+                No session profiles are available yet. Create one from Session Profiles to populate the card rail.
+              </div>
+            </div>
+          </article>
+        </aside>
       </main>
 
-      <main v-else-if="activePage === 'fix-messages'" class="workspace workspace--single">
+      <main v-else-if="activePage === 'fix-messages'" class="page-grid">
         <section class="stack">
           <article class="panel orders-panel">
             <div class="panel__header orders-panel__header">
-              <div>
-                <h2 class="panel__title">Fix Sent/Received</h2>
-                <p class="panel__copy">Recent FIX messages captured in real time — both sent and received.</p>
+              <div class="fix-messages-header__summary">
+                <h2 class="panel__title">Fix In/Out</h2>
+                <p class="panel__copy">Recent FIX messages captured in real time — both inbound and outbound.</p>
               </div>
               <span class="orders-panel__count mono">{{ fixMsgTotal }} total</span>
             </div>
@@ -660,31 +876,73 @@ createApp({
             </div>
           </article>
         </section>
+
+        <aside class="stack page-grid__aside">
+          <article class="panel panel--compact">
+            <div class="panel__header">
+              <h2 class="panel__title">Session Control</h2>
+              <button class="button button--ghost session-control-panel__manage" @click="openPage('session-profiles')">Edit Profiles</button>
+            </div>
+            <div class="panel__body compact-stack session-control-rail">
+              <div v-if="sessionControlCards.length" class="session-control-rail__cards">
+                <article
+                  v-for="card in sessionControlCards"
+                  :key="card.profileName"
+                  class="runtime-session-card"
+                  :class="runtimeSessionCardClass(card)"
+                  role="button"
+                  tabindex="0"
+                  @click="loadSessionCard(card.profileName)"
+                  @keydown.enter.prevent="loadSessionCard(card.profileName)"
+                  @keydown.space.prevent="loadSessionCard(card.profileName)">
+                  <div class="runtime-session-card__header">
+                    <div>
+                      <p class="runtime-session-card__title">{{ card.profileName }}</p>
+                      <p class="runtime-session-card__meta">{{ card.host }}:{{ card.port }} · {{ card.fixVersionLabel }}</p>
+                    </div>
+                    <span class="chip" :class="runtimeSessionToneClass(card)">{{ card.status }}</span>
+                  </div>
+                  <div class="chip-row runtime-session-card__state">
+                    <span v-if="card.loaded" class="chip chip--success">Selected</span>
+                  </div>
+                  <div class="runtime-session-card__details mono">
+                    <span>{{ card.senderCompId }}</span>
+                    <span>→</span>
+                    <span>{{ card.targetCompId }}</span>
+                  </div>
+                  <p v-if="sessionControlCardCopy(card)" class="runtime-session-card__meta">{{ sessionControlCardCopy(card) }}</p>
+                  <div class="runtime-session-card__actions">
+                    <button class="button button--ghost" @click.stop="editSessionCard(card.profileName)">Edit</button>
+                    <button class="button button--ghost button--danger-outline" @click.stop="deleteSessionCard(card)" :disabled="!canDeleteSessionCard(card) || busyAction === 'delete-profile'">Delete</button>
+                    <button class="button" :class="runtimeSessionButtonClass(card)" @click.stop="toggleRuntimeSession(card)" :disabled="runtimeSessionButtonDisabled(card)">{{ runtimeSessionButtonLabel(card) }}</button>
+                  </div>
+                </article>
+              </div>
+
+              <div v-else class="runtime-roster__empty">
+                No session profiles are available yet. Create one from Session Profiles to populate the card rail.
+              </div>
+            </div>
+          </article>
+        </aside>
       </main>
 
-      <main v-else class="workspace workspace--single">
+      <main v-else-if="activePage === 'session-profiles'" class="workspace workspace--single">
         <section class="stack">
           <article class="panel">
             <div class="panel__header">
               <div>
-                <h2 class="panel__title">Settings</h2>
-                <p class="panel__copy">Maintain default and custom FIX session profiles, plus the filesystem location where profiles are stored.</p>
+                <h2 class="panel__title">Session Profiles</h2>
+                <p class="panel__copy">Create, load, activate, and edit FIX connectivity profiles without changing global workspace settings.</p>
               </div>
-              <span class="chip">Active · {{ settingsState.activeProfileName }}</span>
+              <span class="chip">Active · {{ sessionProfilesState.activeProfileName }}</span>
             </div>
             <div class="panel__body settings-grid">
               <section class="stack">
                 <div class="compact-card">
-                  <p class="eyebrow">Profile storage</p>
-                  <p class="compact-card__copy">Profiles are loaded from and saved to the path below.</p>
-                  <div class="field" style="margin-top: 12px;">
-                    <span class="field__label">Storage path</span>
-                    <input v-model="storagePathDraft" />
-                  </div>
-                  <p class="compact-card__copy" style="margin-top: 10px;">Default temp path: {{ settingsState.defaultStoragePath }}</p>
-                  <div class="button-row">
-                    <button class="button" @click="applyStoragePath" :disabled="busyAction === 'storage-path'">Apply path</button>
-                  </div>
+                  <p class="eyebrow">Active session profile</p>
+                  <p class="compact-card__value">{{ activeSessionProfileLabel }}</p>
+                  <p class="compact-card__copy">{{ session.pendingProfileChange ? 'Reconnect required to apply the selected profile.' : 'Single-session runtime behavior is intentionally preserved for this milestone.' }}</p>
                 </div>
 
                 <div class="compact-card">
@@ -692,14 +950,16 @@ createApp({
                   <div class="field" style="margin-top: 12px;">
                     <span class="field__label">Available profiles</span>
                     <select v-model="selectedProfileName">
-                      <option v-for="profile in settingsState.profiles" :key="profile.name" :value="profile.name">{{ profile.name }}</option>
+                      <option v-for="profile in sessionProfilesState.profiles" :key="profile.name" :value="profile.name">{{ profile.name }}</option>
                     </select>
                   </div>
                   <div class="button-row">
                     <button class="button" @click="loadSelectedProfile">Load profile</button>
                     <button class="button button--ghost" @click="activateSelectedProfile" :disabled="busyAction === 'activate-profile'">Activate</button>
                     <button class="button button--soft" @click="startNewProfile">New profile</button>
+                    <button class="button button--ghost button--danger-outline" @click="deleteSelectedProfile()" :disabled="busyAction === 'delete-profile'">Delete profile</button>
                   </div>
+                  <p class="compact-card__copy" style="margin-top: 10px;">Profile storage location is managed from the Settings page.</p>
                 </div>
               </section>
 
@@ -774,6 +1034,176 @@ createApp({
         </section>
       </main>
 
+      <main v-else-if="activePage === 'about'" class="workspace workspace--single">
+        <section class="stack">
+          <article class="panel">
+            <div class="panel__header">
+              <div>
+                <h2 class="panel__title">About TheFixClient</h2>
+                <p class="panel__copy">Architecture overview and component summary for the browser workstation, server layer, FIX runtime services, and simulator integration.</p>
+              </div>
+              <span class="chip">Architecture</span>
+            </div>
+            <div class="panel__body about-layout">
+              <section class="stack">
+                <div class="compact-card about-hero-card">
+                  <p class="eyebrow">Purpose</p>
+                  <p class="compact-card__value">Multi-session FIX workstation</p>
+                  <p class="compact-card__copy">TheFixClient provides a browser-first operator surface for routing FIX traffic into TheFixSimulator, monitoring recent orders, and managing named FIX session profiles.</p>
+                </div>
+
+                <div class="compact-card">
+                  <p class="eyebrow">Architecture diagram</p>
+                  <svg class="about-diagram" viewBox="0 0 920 420" role="img" aria-label="TheFixClient architecture diagram">
+                    <defs>
+                      <linearGradient id="about-diagram-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="var(--brand)" stop-opacity="0.95" />
+                        <stop offset="100%" stop-color="var(--brand-strong)" stop-opacity="0.95" />
+                      </linearGradient>
+                    </defs>
+                    <rect x="30" y="40" width="240" height="124" rx="18" class="about-diagram__node about-diagram__node--accent" />
+                    <text x="52" y="78" class="about-diagram__title">Browser SPA</text>
+                    <text x="52" y="108" class="about-diagram__text">Views, Display, Help/About</text>
+                    <text x="52" y="132" class="about-diagram__text">Order entry, blotter, FIX tape</text>
+                    <text x="52" y="156" class="about-diagram__text">Right-side session card rail</text>
+
+                    <rect x="340" y="40" width="250" height="124" rx="18" class="about-diagram__node" />
+                    <text x="362" y="78" class="about-diagram__title">Vert.x HTTP Server</text>
+                    <text x="362" y="108" class="about-diagram__text">Static assets + clean routes</text>
+                    <text x="362" y="132" class="about-diagram__text">Overview / profile / template APIs</text>
+                    <text x="362" y="156" class="about-diagram__text">/home, /orders, /recentfixmsgs, /about</text>
+
+                    <rect x="660" y="40" width="230" height="124" rx="18" class="about-diagram__node" />
+                    <text x="682" y="78" class="about-diagram__title">Workbench State</text>
+                    <text x="682" y="108" class="about-diagram__text">Snapshot orchestration</text>
+                    <text x="682" y="132" class="about-diagram__text">Profile + template coordination</text>
+                    <text x="682" y="156" class="about-diagram__text">Per-profile runtime targeting</text>
+
+                    <rect x="170" y="242" width="260" height="124" rx="18" class="about-diagram__node" />
+                    <text x="192" y="280" class="about-diagram__title">Session Profile Store</text>
+                    <text x="192" y="310" class="about-diagram__text">Saved FIX connectivity profiles</text>
+                    <text x="192" y="334" class="about-diagram__text">Activate / edit / rename / delete</text>
+                    <text x="192" y="358" class="about-diagram__text">Workspace-aware persistence</text>
+
+                    <rect x="490" y="242" width="260" height="124" rx="18" class="about-diagram__node about-diagram__node--success" />
+                    <text x="512" y="280" class="about-diagram__title">QuickFIX/J Runtime Services</text>
+                    <text x="512" y="310" class="about-diagram__text">Connect / disconnect / reconnect</text>
+                    <text x="512" y="334" class="about-diagram__text">Manual orders + bulk flows</text>
+                    <text x="512" y="358" class="about-diagram__text">Recent orders, events, raw FIX capture</text>
+
+                    <rect x="760" y="242" width="130" height="124" rx="18" class="about-diagram__node" />
+                    <text x="782" y="280" class="about-diagram__title">Simulator</text>
+                    <text x="782" y="310" class="about-diagram__text">Web UI :8080</text>
+                    <text x="782" y="334" class="about-diagram__text">FIX :9880</text>
+
+                    <path d="M270 102 H340" class="about-diagram__edge" />
+                    <path d="M590 102 H660" class="about-diagram__edge" />
+                    <path d="M775 164 V216 H620" class="about-diagram__edge" />
+                    <path d="M430 304 H490" class="about-diagram__edge" />
+                    <path d="M750 304 H760" class="about-diagram__edge" />
+                    <path d="M620 164 V242" class="about-diagram__edge" />
+                    <path d="M430 304 H450 V164 H660" class="about-diagram__edge about-diagram__edge--muted" />
+                  </svg>
+                </div>
+              </section>
+
+              <section class="stack">
+                <div class="compact-card">
+                  <p class="eyebrow">Components summary</p>
+                  <div class="about-components">
+                    <article v-for="component in aboutComponents" :key="component.title" class="about-component-card">
+                      <h3 class="about-component-card__title">{{ component.title }}</h3>
+                      <p class="about-component-card__summary">{{ component.summary }}</p>
+                      <ul class="about-component-card__list">
+                        <li v-for="bullet in component.bullets" :key="bullet">{{ bullet }}</li>
+                      </ul>
+                    </article>
+                  </div>
+                </div>
+
+                <div class="compact-card">
+                  <p class="eyebrow">Current capabilities</p>
+                  <ul class="about-component-card__list">
+                    <li v-for="capability in aboutCapabilities" :key="capability">{{ capability }}</li>
+                  </ul>
+                </div>
+              </section>
+            </div>
+          </article>
+        </section>
+      </main>
+
+      <main v-else class="workspace workspace--single">
+        <section class="stack">
+          <article class="panel">
+            <div class="panel__header">
+              <div>
+                <h2 class="panel__title">Settings</h2>
+                <p class="panel__copy">Workspace-wide controls only. FIX connectivity and session definitions now live under Session Profiles.</p>
+              </div>
+              <span class="chip">Workspace</span>
+            </div>
+            <div class="panel__body settings-grid">
+              <section class="stack">
+                <div class="compact-card">
+                  <p class="eyebrow">Profile storage</p>
+                  <p class="compact-card__copy">Session profile files are loaded from and saved to this workspace path.</p>
+                  <div class="field" style="margin-top: 12px;">
+                    <span class="field__label">Storage path</span>
+                    <input v-model="storagePathDraft" />
+                  </div>
+                  <p class="compact-card__copy" style="margin-top: 10px;">Default temp path: {{ workspaceSettingsState.defaultStoragePath }}</p>
+                  <div class="button-row">
+                    <button class="button" @click="applyStoragePath" :disabled="busyAction === 'storage-path'">Apply path</button>
+                  </div>
+                </div>
+
+                <div class="compact-card">
+                  <p class="eyebrow">Browser preferences</p>
+                  <p class="compact-card__copy">Theme and refresh cadence are global browser preferences managed from the header for quick access.</p>
+                  <div class="order-grid order-grid--comfortable" style="margin-top: 12px;">
+                    <div class="field">
+                      <span class="field__label">Theme</span>
+                      <input :value="currentThemeLabel" readonly />
+                    </div>
+                    <div class="field">
+                      <span class="field__label">Refresh every</span>
+                      <input :value="currentRefreshFrequencyLabel" readonly />
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="stack">
+                <div class="compact-card">
+                  <p class="eyebrow">Session profile summary</p>
+                  <p class="compact-card__value">{{ workspaceSettingsState.profileCount || sessionProfilesState.profiles.length }} profiles</p>
+                  <p class="compact-card__copy">Active profile: {{ activeSessionProfileLabel }}</p>
+                  <div class="button-row" style="margin-top: 12px;">
+                    <button class="button button--primary" @click="openPage('session-profiles')">Open Session Profiles</button>
+                  </div>
+                </div>
+
+                <div class="compact-card">
+                  <p class="eyebrow">Current runtime</p>
+                  <p class="compact-card__copy">Milestone 1 keeps the current single-session runtime intact while separating global workspace settings from FIX session profile management.</p>
+                  <div class="order-grid order-grid--comfortable" style="margin-top: 12px;">
+                    <div class="field">
+                      <span class="field__label">Session status</span>
+                      <input :value="session.connected ? 'Connected' : 'Standby'" readonly />
+                    </div>
+                    <div class="field">
+                      <span class="field__label">FIX version</span>
+                      <input :value="session.fixVersionLabel || activeFixVersionLabel" readonly />
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </article>
+        </section>
+      </main>
+
       <div v-if="amendModalOpen" class="modal-backdrop" @click.self="closeAmendModal">
         <div class="modal-panel">
           <div class="modal-panel__header">
@@ -831,7 +1261,16 @@ createApp({
             <button class="button button--ghost" @click="closeFixMsgDetail">Close</button>
           </div>
           <div class="modal-panel__body">
-            <pre class="fix-detail-raw">{{ fixMsgDetailFormatted }}</pre>
+            <div class="fix-detail-sections">
+              <div class="fix-detail-section">
+                <span class="field__label">Full FIX message</span>
+                <textarea class="fix-detail-textbox" :value="fixMsgDetailRawMessage" readonly spellcheck="false"></textarea>
+              </div>
+              <div class="fix-detail-section">
+                <span class="field__label">Annotated view</span>
+                <pre class="fix-detail-raw">{{ fixMsgDetailFormatted }}</pre>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -870,6 +1309,7 @@ createApp({
       openOrders: 0,
       sentOrders: 0,
       executionReports: 0,
+      cancels: 0,
       rejects: 0,
       sendFailures: 0,
       sessionUptime: '—'
@@ -892,9 +1332,13 @@ createApp({
       messageTypes: []
     })
 
-    const settingsState = reactive({
+    const workspaceSettingsState = reactive({
       storagePath: '',
       defaultStoragePath: '',
+      profileCount: 0
+    })
+
+    const sessionProfilesState = reactive({
       activeProfileName: 'Default profile',
       profiles: [],
       fixVersionOptions: []
@@ -902,6 +1346,7 @@ createApp({
 
     const recentEvents = ref([])
     const recentOrders = ref([])
+    const runtimeSessions = ref([])
     const messageTemplates = ref([])
     const apiStatus = ref('Connecting…')
     const busyAction = ref('')
@@ -922,10 +1367,10 @@ createApp({
     const settingsDirty = ref(false)
     const suggestedSymbol = ref('AAPL')
     const selectedProfileName = ref(TheFixSessionProfileNameFallback())
+    const editingProfileOriginalName = ref('')
     const storagePathDraft = ref('')
     const selectedSuggestedTagKey = ref('')
     const selectedTemplateId = ref('')
-    const templateNameDraft = ref('')
     const singleMessageViewMode = ref('fields')
     const rawFixDelimiter = ref('|')
     const rawFixInputDraft = ref('')
@@ -945,6 +1390,11 @@ createApp({
     const fixMsgHideHeartbeats = ref(false)
     const fixMsgDetailOpen = ref(false)
     const fixMsgDetail = ref(null)
+    const ordersLimit = ref(10)
+    const ordersOffset = ref(0)
+    const ordersSearch = ref('')
+    const ordersStatusFilter = ref('')
+    const ordersSourceFilter = ref('')
 
     const amendDraft = reactive({
       clOrdId: '',
@@ -993,7 +1443,7 @@ createApp({
     const timeInForces = computed(() => referenceData.timeInForces || [])
     const bulkModes = computed(() => referenceData.bulkModes || [])
     const messageTypes = computed(() => referenceData.messageTypes?.length ? referenceData.messageTypes : fixMetadata.messageTypes || [])
-    const fixVersionOptions = computed(() => settingsState.fixVersionOptions || referenceData.fixVersions || [])
+    const fixVersionOptions = computed(() => sessionProfilesState.fixVersionOptions || referenceData.fixVersions || [])
     const availableMarkets = computed(() => (referenceData.markets || []).filter(market => market.region === orderDraft.region))
     const selectedOrderType = computed(() => orderTypes.value.find(item => item.code === orderDraft.orderType) || null)
     const selectedMessageType = computed(() => messageTypes.value.find(item => item.code === orderDraft.messageType) || null)
@@ -1003,7 +1453,6 @@ createApp({
     const previewWarnings = computed(() => preview.warnings || [])
     const previewStatusLabel = computed(() => preview.status || (session.connected ? 'READY_FOR_ROUTING' : 'READY_PENDING_CONNECTION'))
     const pageOptions = computed(() => PAGE_OPTIONS)
-    const currentPageLabel = computed(() => pageOptions.value.find(page => page.code === activePage.value)?.label || 'Menu')
     const themeChoices = computed(() => THEME_CHOICES)
     const currentThemeLabel = computed(() => themeChoices.value.find(option => option.value === theme.value)?.label || 'System')
     const refreshFrequencyOptions = computed(() => REFRESH_FREQUENCY_OPTIONS)
@@ -1016,9 +1465,88 @@ createApp({
     })
     const refreshFrequencyLabel = (seconds) => `${seconds} second${seconds === 1 ? '' : 's'}`
     const currentRefreshFrequencyLabel = computed(() => refreshFrequencyLabel(activeRefreshSeconds.value))
+    const isSessionScopedPage = computed(() => ['order-input', 'order-blotter', 'fix-messages'].includes(activePage.value))
+    const activeSessionProfileLabel = computed(() => session.profileName || sessionProfilesState.activeProfileName || 'Default profile')
+    const selectedRuntimeSession = computed(() => (runtimeSessions.value || []).find(item => item.profileName === selectedProfileName.value) || null)
+    const sessionControlCards = computed(() => {
+      const cardsByProfile = new Map()
+      const profileOrder = new Map((sessionProfilesState.profiles || []).map((profile, index) => [profile.name, index]))
+
+      ;(sessionProfilesState.profiles || []).forEach(profile => {
+        cardsByProfile.set(profile.name, {
+          profileName: profile.name,
+          senderCompId: profile.senderCompId || '',
+          targetCompId: profile.targetCompId || '',
+          host: profile.fixHost || profile.host || '',
+          port: profile.fixPort || profile.port || '',
+          fixVersionCode: profile.fixVersionCode || '',
+          beginString: profile.beginString || '',
+          connected: false,
+          status: profile.name === sessionProfilesState.activeProfileName ? 'Standby' : 'Available'
+        })
+      })
+
+      ;(runtimeSessions.value || []).forEach(runtime => {
+        const existing = cardsByProfile.get(runtime.profileName) || { profileName: runtime.profileName }
+        cardsByProfile.set(runtime.profileName, {
+          ...existing,
+          ...runtime,
+          profileName: runtime.profileName || existing.profileName,
+          senderCompId: runtime.senderCompId || existing.senderCompId || '',
+          targetCompId: runtime.targetCompId || existing.targetCompId || '',
+          host: runtime.host || existing.host || '',
+          port: runtime.port || existing.port || '',
+          fixVersionCode: runtime.fixVersionCode || existing.fixVersionCode || '',
+          beginString: runtime.beginString || existing.beginString || '',
+          connected: Boolean(runtime.connected),
+          status: runtime.status || existing.status || 'Available'
+        })
+      })
+
+      if (selectedProfileName.value) {
+        const existing = cardsByProfile.get(selectedProfileName.value) || { profileName: selectedProfileName.value }
+        cardsByProfile.set(selectedProfileName.value, {
+          ...existing,
+          senderCompId: existing.senderCompId || session.senderCompId || '',
+          targetCompId: existing.targetCompId || session.targetCompId || '',
+          host: existing.host || session.host || '',
+          port: existing.port || session.port || '',
+          fixVersionCode: existing.fixVersionCode || session.fixVersionCode || '',
+          beginString: existing.beginString || session.beginString || '',
+          connected: existing.connected || Boolean(session.connected),
+          status: existing.status || session.status || 'Available'
+        })
+      }
+
+      return Array.from(cardsByProfile.values())
+        .map(card => ({
+          ...card,
+          fixVersionLabel: card.fixVersionLabel
+            || fixVersionOptions.value.find(option => option.code === card.fixVersionCode)?.label
+            || card.beginString
+            || 'FIX 4.4',
+          loaded: card.profileName === selectedProfileName.value,
+          active: card.profileName === sessionProfilesState.activeProfileName,
+          pendingProfileChange: card.profileName === selectedProfileName.value && Boolean(session.pendingProfileChange),
+          status: card.status || (card.connected ? 'Connected' : 'Available')
+        }))
+        .sort((left, right) => {
+          const leftIndex = profileOrder.has(left.profileName) ? profileOrder.get(left.profileName) : Number.MAX_SAFE_INTEGER
+          const rightIndex = profileOrder.has(right.profileName) ? profileOrder.get(right.profileName) : Number.MAX_SAFE_INTEGER
+          if (leftIndex !== rightIndex) {
+            return leftIndex - rightIndex
+          }
+          return String(left.profileName || '').localeCompare(String(right.profileName || ''))
+        })
+    })
+    const aboutComponents = computed(() => ABOUT_COMPONENTS)
+    const aboutCapabilities = computed(() => ABOUT_CAPABILITIES)
     const activeFixVersionCode = computed(() => session.fixVersionCode || settingsDraft.fixVersionCode || 'FIX_44')
     const activeFixVersionLabel = computed(() => fixVersionOptions.value.find(option => option.code === activeFixVersionCode.value)?.label || 'FIX 4.4')
     const currentFixDictionary = computed(() => (fixMetadata.versions || []).find(version => version.code === activeFixVersionCode.value) || null)
+    const selectedMessageTemplate = computed(() => messageTemplates.value.find(template => String(template.id) === String(selectedTemplateId.value)) || null)
+    const orderStatusOptions = computed(() => Array.from(new Set((recentOrders.value || []).map(order => String(order?.status || '').trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right)))
+    const orderSourceOptions = computed(() => Array.from(new Set((recentOrders.value || []).map(order => String(order?.source || '').trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right)))
     const availableSuggestedTags = computed(() => {
       const messageSpecific = currentFixDictionary.value?.messages?.[orderDraft.messageType] || []
       const usedTags = new Set((orderDraft.additionalTags || []).map(tag => Number(tag.tag || 0)))
@@ -1033,6 +1561,12 @@ createApp({
     const normalizedRawFixDelimiter = computed(() => normalizeRawFixDelimiter(rawFixDelimiter.value))
     const normalizedRawFixDelimiterLabel = computed(() => rawFixDelimiterDisplayLabel(normalizedRawFixDelimiter.value))
     const formattedRawFixMessage = computed(() => formatRawFixMessageForDisplay(rawFixDraft.value, normalizedRawFixDelimiter.value))
+    const fixMsgDetailRawMessage = computed(() => fixMsgDetail.value?.rawMessage || '')
+    const isBulkFlowRunning = computed(() => Boolean(session.autoFlowActive))
+    const canStartBulkFlow = computed(() => Boolean(selectedMessageType.value?.supportsBulk) && !isBulkFlowRunning.value)
+    const canStopBulkFlow = computed(() => isBulkFlowRunning.value)
+    const bulkFlowStartButtonClass = computed(() => isBulkFlowRunning.value ? 'button--soft' : 'button--success')
+    const bulkFlowStopButtonClass = computed(() => isBulkFlowRunning.value ? 'button--danger' : 'button--ghost')
     const execTypeBadge = (execType) => {
       const normalized = String(execType || '').trim().toUpperCase()
       if (normalized === 'FILL' || normalized === 'TRADE') {
@@ -1094,6 +1628,44 @@ createApp({
       return items
     })
 
+    const filteredRecentOrders = computed(() => {
+      let items = recentOrders.value || []
+      if (ordersStatusFilter.value) {
+        items = items.filter(order => String(order?.status || '') === ordersStatusFilter.value)
+      }
+      if (ordersSourceFilter.value) {
+        items = items.filter(order => String(order?.source || '') === ordersSourceFilter.value)
+      }
+      const query = (ordersSearch.value || '').trim().toLowerCase()
+      if (query) {
+        items = items.filter(order => [
+          order?.time,
+          order?.messageType,
+          order?.messageTypeCode,
+          order?.symbol,
+          order?.side,
+          order?.quantity,
+          order?.limitPrice,
+          order?.status,
+          order?.execType,
+          order?.source,
+          order?.clOrdId,
+          order?.region,
+          order?.market,
+          order?.currency,
+          order?.note
+        ].some(value => String(value || '').toLowerCase().includes(query)))
+      }
+      return items
+    })
+    const filteredOrdersTotal = computed(() => filteredRecentOrders.value.length)
+    const paginatedRecentOrders = computed(() => filteredRecentOrders.value.slice(ordersOffset.value, ordersOffset.value + ordersLimit.value))
+    const ordersRangeStart = computed(() => filteredOrdersTotal.value ? ordersOffset.value + 1 : 0)
+    const ordersRangeEnd = computed(() => filteredOrdersTotal.value ? Math.min(ordersOffset.value + ordersLimit.value, filteredOrdersTotal.value) : 0)
+    const ordersCountLabel = computed(() => filteredOrdersTotal.value === (recentOrders.value || []).length
+      ? `${(recentOrders.value || []).length} recent`
+      : `${filteredOrdersTotal.value} filtered · ${(recentOrders.value || []).length} recent`)
+
     const fixMsgDetailFormatted = computed(() => {
       if (!fixMsgDetail.value?.rawMessage) return ''
       return fixMsgDetail.value.rawMessage
@@ -1111,9 +1683,14 @@ createApp({
         .join('\n')
     })
 
+    const fixFieldLabel = (fieldKey, fallback) => {
+      const tag = FIX_FORM_FIELD_TAGS[fieldKey]
+      return tag ? `${fallback} (${tag})` : fallback
+    }
+
     const loadFixMessages = async () => {
       try {
-        const data = await apiCall('/api/fix-messages?limit=' + fixMsgLimit.value + '&offset=' + fixMsgOffset.value)
+        const data = await apiCall('/api/fix-messages?limit=' + fixMsgLimit.value + '&offset=' + fixMsgOffset.value + '&' + selectedProfileQuery())
         fixMessages.value = data.items || []
         fixMsgTotal.value = data.total || 0
       } catch (error) {
@@ -1129,6 +1706,14 @@ createApp({
     const fixMsgNext = () => {
       fixMsgOffset.value = fixMsgOffset.value + fixMsgLimit.value
       loadFixMessages()
+    }
+
+    const ordersPrev = () => {
+      ordersOffset.value = Math.max(0, ordersOffset.value - ordersLimit.value)
+    }
+
+    const ordersNext = () => {
+      ordersOffset.value = Math.min(ordersOffset.value + ordersLimit.value, Math.max(filteredOrdersTotal.value - 1, 0))
     }
 
     const openFixMsgDetail = (msg) => {
@@ -1202,6 +1787,12 @@ createApp({
       }
       return response.json()
     }
+
+    const selectedProfileQuery = () => `profileName=${encodeURIComponent(selectedProfileName.value || '')}`
+    const withSelectedProfile = (payload = {}) => ({
+      ...payload,
+      profileName: selectedProfileName.value || ''
+    })
 
     const applyFixMetadata = (payload) => {
       Object.assign(fixMetadata, {
@@ -1450,23 +2041,30 @@ createApp({
 
     const syncSettingsDraft = (profile) => {
       Object.assign(settingsDraft, emptySettingsDraft(), profile || {})
+      editingProfileOriginalName.value = profile?.name || ''
       settingsDirty.value = false
     }
 
-    const applySettings = (settings, preserveDraft = true) => {
-      Object.assign(settingsState, {
+    const applyWorkspaceSettings = (settings) => {
+      Object.assign(workspaceSettingsState, {
         storagePath: settings?.storagePath || '',
         defaultStoragePath: settings?.defaultStoragePath || '',
+        profileCount: Number(settings?.profileCount || 0)
+      })
+      storagePathDraft.value = workspaceSettingsState.storagePath
+    }
+
+    const applySessionProfiles = (settings, preserveDraft = true) => {
+      Object.assign(sessionProfilesState, {
         activeProfileName: settings?.activeProfileName || 'Default profile',
         profiles: settings?.profiles || [],
         fixVersionOptions: settings?.fixVersionOptions || []
       })
-      if (!selectedProfileName.value || !settingsState.profiles.some(profile => profile.name === selectedProfileName.value)) {
-        selectedProfileName.value = settingsState.activeProfileName
+      if (!selectedProfileName.value || !sessionProfilesState.profiles.some(profile => profile.name === selectedProfileName.value)) {
+        selectedProfileName.value = sessionProfilesState.activeProfileName
       }
       if (!settingsInitialized.value || !preserveDraft || !settingsDirty.value) {
-        syncSettingsDraft(settings?.profileDraft || settingsState.profiles.find(profile => profile.name === settingsState.activeProfileName))
-        storagePathDraft.value = settingsState.storagePath
+        syncSettingsDraft(settings?.profileDraft || sessionProfilesState.profiles.find(profile => profile.name === sessionProfilesState.activeProfileName))
       }
       settingsInitialized.value = true
     }
@@ -1506,6 +2104,103 @@ createApp({
       }
     }
 
+    const syncSelectedProfileDraft = (profileName) => {
+      if (!profileName) {
+        return
+      }
+      selectedProfileName.value = profileName
+      const profile = sessionProfilesState.profiles.find(item => item.name === profileName)
+      if (profile) {
+        syncSettingsDraft(profile)
+      }
+    }
+
+    const runtimeSessionToneClass = (runtime) => {
+      if (!runtime) {
+        return 'chip--neutral'
+      }
+      const status = String(runtime.status || '').trim().toLowerCase()
+      if (runtime.connected) {
+        return 'chip--success'
+      }
+      if (status.includes('error') || status.includes('reject')) {
+        return 'chip--danger'
+      }
+      if (status.includes('connect')) {
+        return 'chip--warn'
+      }
+      return 'chip--neutral'
+    }
+
+    const runtimeSessionCardClass = (runtime) => ({
+      'runtime-session-card--selected': runtime?.profileName === selectedProfileName.value,
+      'runtime-session-card--connected': Boolean(runtime?.connected)
+    })
+
+    const runtimeSessionIsConnecting = (runtime) => {
+      if (!runtime || runtime.connected) {
+        return false
+      }
+      return String(runtime.status || '').trim().toLowerCase().includes('connect')
+    }
+
+    const runtimeSessionButtonLabel = (runtime) => {
+      if (!runtime) return 'Connect'
+      if (runtimeSessionIsConnecting(runtime)) return 'Stop reconnecting'
+      return runtime.connected ? 'Disconnect' : 'Connect'
+    }
+
+    const runtimeSessionButtonClass = (runtime) => {
+      if (!runtime) return 'button--success'
+      if (runtimeSessionIsConnecting(runtime)) return 'button--danger-outline'
+      return runtime.connected ? 'button--danger' : 'button--success'
+    }
+
+    const runtimeSessionButtonDisabled = (runtime) => {
+      if (!runtime || !sessionActionPending.value) {
+        return false
+      }
+      const isSelectedRuntime = runtime.profileName === selectedProfileName.value
+      if (!isSelectedRuntime) {
+        return true
+      }
+      return sessionActionPending.value === 'disconnect'
+    }
+
+    const sessionControlCardCopy = (card) => {
+      if (!card) {
+        return 'Available session profile.'
+      }
+      if (!canDeleteSessionCard(card)) {
+        return card.connected
+          ? 'Disconnect this runtime before deleting the profile.'
+          : ''
+      }
+      if (card.pendingProfileChange) {
+        return 'Reconnect required to apply the loaded profile to the live FIX session.'
+      }
+      if (runtimeSessionIsConnecting(card)) {
+        return 'This runtime is reconnecting. Use the reconnect control to stop the initiator if needed.'
+      }
+      if (card.connected) {
+        return 'Live runtime connected for this session profile.'
+      }
+      if (card.loaded) {
+        return ''
+      }
+      return 'Available session profile. Load it into the main workspace when needed.'
+    }
+
+    const canDeleteSessionCard = (card) => {
+      if (!card?.profileName) {
+        return false
+      }
+      if (card.connected) {
+        return false
+      }
+      return sessionControlCards.value.length > 1
+    }
+
     const applyOverview = (payload, preserveSettingsDraft = true, preservePendingSessionState = false) => {
       Object.assign(overview, {
         applicationName: payload.applicationName
@@ -1531,6 +2226,7 @@ createApp({
       Object.assign(referenceData, payload.referenceData || {})
       recentEvents.value = payload.recentEvents || []
       recentOrders.value = payload.recentOrders || []
+      runtimeSessions.value = payload.runtimeSessions || []
 
       if (!draftInitialized.value) {
         initializeDrafts(payload.defaults || {})
@@ -1540,7 +2236,13 @@ createApp({
       }
 
       if (payload.settings) {
-        applySettings(payload.settings, preserveSettingsDraft)
+        applyWorkspaceSettings(payload.settings)
+      }
+
+      if (payload.sessionProfiles) {
+        applySessionProfiles(payload.sessionProfiles, preserveSettingsDraft)
+      } else if (payload.settings?.profiles) {
+        applySessionProfiles(payload.settings, preserveSettingsDraft)
       }
 
       reconcileSessionActionPending(nextSession)
@@ -1554,7 +2256,7 @@ createApp({
       }
       overviewRefreshPending.value = true
       try {
-        applyOverview(await apiCall('/api/overview'), true, true)
+        applyOverview(await apiCall('/api/overview?' + selectedProfileQuery()), true, true)
       } catch (error) {
         apiStatus.value = 'Unavailable'
         recentEvents.value = [{
@@ -1577,17 +2279,11 @@ createApp({
       } else if (!templates.some(template => String(template.id) === previousSelection)) {
         selectedTemplateId.value = ''
       }
-      if (selectedTemplateId.value) {
-        const selectedTemplate = templates.find(template => String(template.id) === String(selectedTemplateId.value))
-        if (selectedTemplate) {
-          templateNameDraft.value = selectedTemplate.name || templateNameDraft.value
-        }
-      }
     }
 
     const loadTemplates = async () => {
       try {
-        applyTemplates(await apiCall('/api/templates'))
+        applyTemplates(await apiCall('/api/templates?' + selectedProfileQuery()))
       } catch (error) {
         console.warn('Unable to load FIX message templates', error)
       }
@@ -1631,20 +2327,27 @@ createApp({
       if (!selectedTemplate) {
         return
       }
-      templateNameDraft.value = selectedTemplate.name || ''
       applyTemplateDraft(selectedTemplate.draft || {})
     }
 
-    const saveCurrentTemplate = async () => runAction('save-template', async () => {
-      const templateName = (templateNameDraft.value || '').trim()
-      if (!templateName) {
-        window.alert('Template name is required before saving.')
-        return
+    const resolvedTemplateSaveName = () => {
+      const existingTemplateName = String(selectedMessageTemplate.value?.name || '').trim()
+      if (existingTemplateName) {
+        return existingTemplateName
       }
+      const messageLabel = String(selectedMessageType.value?.label || 'FIX message').trim()
+      const symbol = String(orderDraft.symbol || '').trim()
+      const descriptor = symbol ? `${messageLabel} · ${symbol}` : messageLabel
+      const timestamp = new Date().toISOString().replace('T', ' ').replace('Z', ' UTC')
+      return `Saved · ${timestamp} · ${descriptor}`
+    }
+
+    const saveCurrentTemplate = async () => runAction('save-template', async () => {
       applyTemplates(await apiCall('/api/templates/save', {
         method: 'POST',
         body: JSON.stringify({
-          name: templateName,
+          profileName: selectedProfileName.value || '',
+          name: resolvedTemplateSaveName(),
           draft: buildOrderPayload()
         })
       }))
@@ -1670,6 +2373,7 @@ createApp({
       const payload = await apiCall('/api/orders/amend', {
         method: 'POST',
         body: JSON.stringify({
+          profileName: selectedProfileName.value || '',
           clOrdId: amendDraft.clOrdId,
           quantity: Number(amendDraft.quantity || 0),
           price: Number(amendDraft.price || 0)
@@ -1700,7 +2404,7 @@ createApp({
       }
       const payload = await apiCall('/api/orders/cancel', {
         method: 'POST',
-        body: JSON.stringify({ clOrdId: cancelTarget.value.clOrdId })
+        body: JSON.stringify({ profileName: selectedProfileName.value || '', clOrdId: cancelTarget.value.clOrdId })
       })
       applyOverview(payload, true)
       if (payload?.actionResult?.success) {
@@ -1749,7 +2453,13 @@ createApp({
       })).filter(tag => tag.tag || tag.name || tag.value)
     })
 
+    const buildBulkOrderPayload = () => ({
+      ...buildOrderPayload(),
+      additionalTags: []
+    })
+
     const buildSettingsPayload = () => ({
+      originalName: (editingProfileOriginalName.value || settingsDraft.name || '').trim(),
       name: (settingsDraft.name || '').trim(),
       senderCompId: (settingsDraft.senderCompId || '').trim(),
       targetCompId: (settingsDraft.targetCompId || '').trim(),
@@ -1774,7 +2484,7 @@ createApp({
     }
 
     const runSessionAction = async (name, work) => {
-      if (sessionActionPending.value) {
+      if (sessionActionPending.value && !(sessionActionPending.value === 'connect' && name === 'disconnect')) {
         return
       }
       sessionActionPending.value = name
@@ -1791,9 +2501,10 @@ createApp({
     }
 
     const previewTicket = async () => {
+      const draftPayload = activeMode.value === 'bulk' ? buildBulkOrderPayload() : buildOrderPayload()
       const payload = await apiCall('/api/order-ticket/preview', {
         method: 'POST',
-        body: JSON.stringify(buildOrderPayload())
+        body: JSON.stringify(withSelectedProfile(draftPayload))
       })
       Object.assign(preview, payload)
       return payload
@@ -1809,53 +2520,163 @@ createApp({
     }
 
     const connectSession = async () => runSessionAction('connect', async () => runAction('connect', async () => {
-      applyOverview(await apiCall('/api/session/connect', { method: 'POST' }), true)
+      const payload = await apiCall('/api/session/connect', {
+        method: 'POST',
+        body: JSON.stringify(withSelectedProfile())
+      })
+      applyOverview(payload, true)
+      if (payload?.actionResult && payload.actionResult.success === false) {
+        window.alert(payload.actionResult.message || 'Unable to connect the selected session profile.')
+      }
     }))
     const disconnectSession = async () => runSessionAction('disconnect', async () => runAction('disconnect', async () => {
       if (session.autoFlowActive) {
-        applyOverview(await apiCall('/api/order-flow/stop', { method: 'POST' }), true)
+        applyOverview(await apiCall('/api/order-flow/stop', {
+          method: 'POST',
+          body: JSON.stringify(withSelectedProfile())
+        }), true)
       }
-      applyOverview(await apiCall('/api/session/disconnect', { method: 'POST' }), true)
+      applyOverview(await apiCall('/api/session/disconnect', {
+        method: 'POST',
+        body: JSON.stringify(withSelectedProfile())
+      }), true)
     }))
-    const pulseTest = async () => runAction('pulse', async () => applyOverview(await apiCall('/api/session/pulse-test', { method: 'POST' }), true))
+    const pulseTest = async () => runAction('pulse', async () => applyOverview(await apiCall('/api/session/pulse-test', {
+      method: 'POST',
+      body: JSON.stringify(withSelectedProfile())
+    }), true))
+
+    const connectProfile = async (profileName) => {
+      syncSelectedProfileDraft(profileName)
+      await connectSession()
+    }
+
+    const selectRuntimeProfile = (profileName) => {
+      syncSelectedProfileDraft(profileName)
+      loadOverview().catch(() => {})
+      loadTemplates().catch(() => {})
+      if (activePage.value === 'fix-messages') {
+        fixMsgOffset.value = 0
+        loadFixMessages().catch(() => {})
+      }
+    }
+
+    const disconnectProfile = async (profileName) => {
+      syncSelectedProfileDraft(profileName)
+      await disconnectSession()
+    }
+
+    const loadSessionCard = (profileName) => {
+      if (!profileName) {
+        return
+      }
+      syncSelectedProfileDraft(profileName)
+      loadSelectedProfile()
+    }
+
+    const editSessionCard = (profileName) => {
+      if (!profileName) {
+        return
+      }
+      syncSelectedProfileDraft(profileName)
+      const profile = sessionProfilesState.profiles.find(item => item.name === profileName)
+      if (profile) {
+        syncSettingsDraft(profile)
+      }
+      openPage('session-profiles')
+    }
+
+    const deleteSelectedProfile = async (profileName = selectedProfileName.value) => runAction('delete-profile', async () => {
+      const targetProfileName = String(profileName || '').trim()
+      if (!targetProfileName) {
+        return
+      }
+      const targetCard = sessionControlCards.value.find(card => card.profileName === targetProfileName)
+      if (!canDeleteSessionCard(targetCard)) {
+        window.alert(targetCard?.connected
+          ? 'Disconnect this session before deleting its profile.'
+          : 'At least one session profile must remain available.')
+        return
+      }
+      const confirmed = window.confirm(`Delete FIX session profile "${targetProfileName}"? This removes the saved profile from the workstation.`)
+      if (!confirmed) {
+        return
+      }
+      const payload = await apiCall('/api/session-profiles/delete', {
+        method: 'POST',
+        body: JSON.stringify({ name: targetProfileName })
+      })
+      applyOverview(payload, false)
+      if (!payload?.actionResult?.success) {
+        window.alert(payload?.actionResult?.message || 'Unable to delete the selected session profile.')
+        return
+      }
+      await loadTemplates()
+      if (activePage.value === 'fix-messages') {
+        fixMsgOffset.value = 0
+        await loadFixMessages()
+      }
+    })
+
+    const deleteSessionCard = (card) => {
+      deleteSelectedProfile(card?.profileName)
+    }
+
+    const toggleRuntimeSession = async (runtime) => {
+      if (!runtime?.profileName) {
+        return
+      }
+      if (runtime.connected || runtimeSessionIsConnecting(runtime)) {
+        await disconnectProfile(runtime.profileName)
+      } else {
+        await connectProfile(runtime.profileName)
+      }
+    }
 
     const sendTicket = async () => runAction('send', async () => {
       await previewTicket()
       applyOverview(await apiCall('/api/order-ticket/send', {
         method: 'POST',
-        body: JSON.stringify(buildOrderPayload())
+        body: JSON.stringify(withSelectedProfile(buildOrderPayload()))
       }), true)
-      await loadTemplates()
     })
 
     const startBulkFlow = async () => runAction('flow-start', async () => {
       await previewTicket()
-      applyOverview(await apiCall('/api/order-flow/start', {
+      const payload = await apiCall('/api/order-flow/start', {
         method: 'POST',
-        body: JSON.stringify({
-          ...buildOrderPayload(),
+        body: JSON.stringify(withSelectedProfile({
+          ...buildBulkOrderPayload(),
           bulkMode: bulkDraft.bulkMode,
           totalOrders: Number(bulkDraft.totalOrders || 0),
           ratePerSecond: Number(bulkDraft.ratePerSecond || 0),
           burstSize: Number(bulkDraft.burstSize || 0),
           burstIntervalMs: Number(bulkDraft.burstIntervalMs || 0)
-        })
-      }), true)
+        }))
+      })
+      applyOverview(payload, true)
+      if (payload?.actionResult && payload.actionResult.success === false) {
+        window.alert(payload.actionResult.message || 'Unable to start bulk flow for the selected session profile.')
+      }
     })
 
-    const stopBulkFlow = async () => runAction('flow-stop', async () => applyOverview(await apiCall('/api/order-flow/stop', { method: 'POST' }), true))
+    const stopBulkFlow = async () => runAction('flow-stop', async () => applyOverview(await apiCall('/api/order-flow/stop', {
+      method: 'POST',
+      body: JSON.stringify(withSelectedProfile())
+    }), true))
 
     const saveSettingsProfile = async () => runAction('save-profile', async () => {
-      const payload = await apiCall('/api/settings/profiles/save', {
+      const payload = await apiCall('/api/session-profiles/save', {
         method: 'POST',
         body: JSON.stringify(buildSettingsPayload())
       })
       applyOverview(payload, false)
       selectedProfileName.value = settingsDraft.name
+      editingProfileOriginalName.value = settingsDraft.name
     })
 
     const activateSelectedProfile = async () => runAction('activate-profile', async () => {
-      const payload = await apiCall('/api/settings/profiles/activate', {
+      const payload = await apiCall('/api/session-profiles/activate', {
         method: 'POST',
         body: JSON.stringify({ name: selectedProfileName.value })
       })
@@ -1871,21 +2692,26 @@ createApp({
     })
 
     const loadSelectedProfile = () => {
-      const profile = settingsState.profiles.find(item => item.name === selectedProfileName.value)
+      const profile = sessionProfilesState.profiles.find(item => item.name === selectedProfileName.value)
       if (profile) {
         syncSettingsDraft(profile)
+      }
+      loadOverview().catch(() => {})
+      loadTemplates().catch(() => {})
+      if (activePage.value === 'fix-messages') {
+        loadFixMessages().catch(() => {})
       }
     }
 
     const resetSettingsDraft = () => {
-      const profile = settingsState.profiles.find(item => item.name === settingsState.activeProfileName)
+      const profile = sessionProfilesState.profiles.find(item => item.name === sessionProfilesState.activeProfileName)
       syncSettingsDraft(profile)
-      storagePathDraft.value = settingsState.storagePath
     }
 
     const startNewProfile = () => {
-      const activeProfile = settingsState.profiles.find(item => item.name === settingsState.activeProfileName)
+      const activeProfile = sessionProfilesState.profiles.find(item => item.name === sessionProfilesState.activeProfileName)
       syncSettingsDraft({ ...(activeProfile || emptySettingsDraft()), name: 'New profile' })
+      editingProfileOriginalName.value = ''
       settingsDirty.value = true
     }
 
@@ -1937,7 +2763,7 @@ createApp({
         return
       }
       activePage.value = resolvedPage
-      if (replaceAlias && (currentPath === '/' || currentPath === '/index.html' || currentPath === '/order' || currentPath === '/blotter' || currentPath === '/recentfixmsgs')) {
+      if (replaceAlias && (currentPath === '/' || currentPath === '/index.html' || currentPath === '/order' || currentPath === '/blotter' || currentPath === '/recentfixmsgs' || currentPath === '/sessionprofiles')) {
         window.history.replaceState({ page: resolvedPage }, '', pagePathForCode(resolvedPage))
       }
     }
@@ -1994,8 +2820,30 @@ createApp({
       closeTopbarPanels()
     }
 
+    const goBack = () => {
+      closeMenu()
+      window.history.back()
+    }
+
+    const goForward = () => {
+      closeMenu()
+      window.history.forward()
+    }
+
+    const goHome = () => {
+      openPage('order-input')
+    }
+
+    const desktopMenuOpen = ref('')
+
+    const toggleDesktopMenu = (menuKey) => {
+      desktopMenuOpen.value = desktopMenuOpen.value === menuKey ? '' : menuKey
+      closeTopbarPanels()
+    }
+
     const closeMenu = () => {
       closeTopbarPanels()
+      desktopMenuOpen.value = ''
     }
 
     watch(theme, applyTheme, { immediate: true })
@@ -2008,10 +2856,29 @@ createApp({
       }
     })
 
-    watch(() => settingsState.activeProfileName, () => {
+    watch(() => selectedProfileName.value, () => {
       selectedTemplateId.value = ''
-      templateNameDraft.value = ''
+      ordersOffset.value = 0
+      loadOverview().catch(() => {})
       loadTemplates().catch(() => {})
+      if (activePage.value === 'fix-messages') {
+        fixMsgOffset.value = 0
+        loadFixMessages().catch(() => {})
+      }
+    })
+
+    watch([ordersLimit, ordersSearch, ordersStatusFilter, ordersSourceFilter], () => {
+      ordersOffset.value = 0
+    })
+
+    watch([filteredOrdersTotal, ordersLimit], () => {
+      if (!filteredOrdersTotal.value) {
+        ordersOffset.value = 0
+        return
+      }
+      if (ordersOffset.value >= filteredOrdersTotal.value) {
+        ordersOffset.value = Math.max(0, Math.floor((filteredOrdersTotal.value - 1) / ordersLimit.value) * ordersLimit.value)
+      }
     })
 
     watch(activeRefreshSeconds, () => {
@@ -2073,6 +2940,7 @@ createApp({
       session,
       kpis,
       recentOrders,
+      runtimeSessions,
       messageTemplates,
       apiStatus,
       activePage,
@@ -2082,7 +2950,6 @@ createApp({
       themeMenuOpen,
       refreshMenuOpen,
       pageOptions,
-      currentPageLabel,
       busyAction,
       theme,
       themeChoices,
@@ -2090,6 +2957,14 @@ createApp({
       refreshFrequencyOptions,
       activeRefreshSeconds,
       currentRefreshFrequencyLabel,
+      desktopMenuOpen,
+      isSessionScopedPage,
+      activeSessionProfileLabel,
+      selectedRuntimeSession,
+      sessionControlCards,
+      aboutComponents,
+      aboutCapabilities,
+      editingProfileOriginalName,
       orderDraft,
       bulkDraft,
       preview,
@@ -2102,6 +2977,7 @@ createApp({
       rawFixParseWarnings,
       normalizedRawFixDelimiterLabel,
       formattedRawFixMessage,
+      fixMsgDetailRawMessage,
       regions,
       sides,
       messageTypes,
@@ -2115,11 +2991,15 @@ createApp({
       availableSuggestedTags,
       availableMarkets,
       activeBulkMode,
+      isBulkFlowRunning,
+      canStartBulkFlow,
+      canStopBulkFlow,
+      bulkFlowStartButtonClass,
+      bulkFlowStopButtonClass,
       needsLimitPrice,
       needsStopPrice,
       selectedSuggestedTagKey,
       selectedTemplateId,
-      templateNameDraft,
       amendModalOpen,
       cancelDialogOpen,
       cancelTarget,
@@ -2135,25 +3015,58 @@ createApp({
       fixMsgDetail,
       fixMsgDetailFormatted,
       filteredFixMessages,
+      filteredRecentOrders,
+      filteredOrdersTotal,
+      paginatedRecentOrders,
+      ordersRangeStart,
+      ordersRangeEnd,
+      ordersCountLabel,
       loadFixMessages,
       fixMsgPrev,
       fixMsgNext,
+      ordersLimit,
+      ordersOffset,
+      ordersSearch,
+      ordersStatusFilter,
+      ordersSourceFilter,
+      orderStatusOptions,
+      orderSourceOptions,
+      ordersPrev,
+      ordersNext,
       openFixMsgDetail,
       closeFixMsgDetail,
       sessionActionBusy,
       sessionButtonLabel,
+      runtimeSessionToneClass,
+      runtimeSessionCardClass,
+      runtimeSessionIsConnecting,
+      runtimeSessionButtonLabel,
+      runtimeSessionButtonClass,
+      runtimeSessionButtonDisabled,
+      sessionControlCardCopy,
+      canDeleteSessionCard,
+      fixFieldLabel,
       execTypeBadge,
       blotterSideClass,
       blotterStatusClass,
       blotterSourceClass,
       orderRowClass,
-      settingsState,
+      workspaceSettingsState,
+      sessionProfilesState,
       settingsDraft,
       selectedProfileName,
       storagePathDraft,
       regionLabel,
       connectSession,
       disconnectSession,
+      connectProfile,
+      disconnectProfile,
+      loadSessionCard,
+      editSessionCard,
+      deleteSessionCard,
+      deleteSelectedProfile,
+      selectRuntimeProfile,
+      toggleRuntimeSession,
       pulseTest,
       sendTicket,
       startBulkFlow,
@@ -2181,9 +3094,13 @@ createApp({
       submitCancel,
       onRegionChange,
       onMarketChange,
+      goBack,
+      goForward,
+      goHome,
       toggleMenu,
       toggleThemeMenu,
       toggleRefreshMenu,
+      toggleDesktopMenu,
       selectTheme,
       selectRefreshFrequency,
       refreshFrequencyLabel,

@@ -90,11 +90,12 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     );
 
     private final TheFixClientConfig config;
-    private final TheFixSessionProfileStore profileStore;
+    private final TheFixSessionProfile runtimeProfile;
     private final AtomicReference<SessionID> activeSessionId = new AtomicReference<>();
     private final AtomicLong sequence = new AtomicLong();
     private final AtomicLong sentCount = new AtomicLong();
     private final AtomicLong execReportCount = new AtomicLong();
+    private final AtomicLong cancelCount = new AtomicLong();
     private final AtomicLong rejectCount = new AtomicLong();
     private final AtomicLong sendFailureCount = new AtomicLong();
     private final ScheduledExecutorService autoFlowExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -121,10 +122,14 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     private TheFixBulkOptions autoFlowOptions;
     private long autoFlowRemaining;
 
-    TheFixClientFixService(TheFixClientConfig config, TheFixSessionProfileStore profileStore) {
+    TheFixClientFixService(TheFixClientConfig config, TheFixSessionProfile runtimeProfile) {
         this.config = config;
-        this.profileStore = profileStore;
-        addEvent("INFO", "FIX service ready", "QuickFIX/J initiator wiring is ready for operator commands.");
+        this.runtimeProfile = runtimeProfile;
+        addEvent("INFO", "FIX service ready", "QuickFIX/J initiator wiring is ready for operator commands for profile " + runtimeProfile.name() + '.');
+    }
+
+    TheFixClientFixService(TheFixClientConfig config, TheFixSessionProfileStore profileStore) {
+        this(config, profileStore.activeProfile());
     }
 
     synchronized void connect() {
@@ -138,21 +143,20 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         }
 
         try {
-            TheFixSessionProfile activeProfile = profileStore.activeProfile();
-            ensureQuickFixDirectories(activeProfile);
-            SessionSettings settings = buildSessionSettings(activeProfile);
+            ensureQuickFixDirectories(runtimeProfile);
+            SessionSettings settings = buildSessionSettings(runtimeProfile);
             MessageStoreFactory storeFactory = new MemoryStoreFactory();
-            LogFactory logFactory = activeProfile.rawMessageLoggingEnabled()
+            LogFactory logFactory = runtimeProfile.rawMessageLoggingEnabled()
                     ? new FileLogFactory(settings)
                     : new NoOpQuickFixLogFactory();
             MessageFactory messageFactory = new DefaultMessageFactory();
 
             initiator = new SocketInitiator(this, storeFactory, settings, logFactory, messageFactory);
             connectionRequested = true;
-            connectedProfile = activeProfile;
+            connectedProfile = runtimeProfile;
             sessionStatus = "Connecting";
             initiator.start();
-            addEvent("INFO", "Connection requested", "Opening QuickFIX/J initiator session to " + activeProfile.fixHost() + ':' + activeProfile.fixPort() + " using profile " + activeProfile.name() + '.');
+            addEvent("INFO", "Connection requested", "Opening QuickFIX/J initiator session to " + runtimeProfile.fixHost() + ':' + runtimeProfile.fixPort() + " using profile " + runtimeProfile.name() + '.');
         } catch (Exception exception) {
             sessionStatus = "Error";
             connectionRequested = false;
@@ -278,6 +282,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         if (!sendBlotterAction(outboundClOrdId, request, "Order cancel sent", "Submitted cancel for " + currentClOrdId + " as " + outboundClOrdId + '.')) {
             return false;
         }
+        cancelCount.incrementAndGet();
         recentOrders.remove(currentClOrdId);
         hiddenClOrdIds.add(currentClOrdId);
         hiddenClOrdIds.add(outboundClOrdId);
@@ -285,9 +290,8 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         return true;
     }
 
-    synchronized JsonObject sessionSnapshot() {
-        TheFixSessionProfile configuredProfile = profileStore.activeProfile();
-        TheFixSessionProfile effectiveProfile = connectedProfile != null ? connectedProfile : configuredProfile;
+    synchronized JsonObject sessionSnapshot(TheFixSessionProfile configuredProfile) {
+        TheFixSessionProfile effectiveProfile = connectedProfile != null ? connectedProfile : runtimeProfile;
         return new JsonObject()
                 .put("connected", loggedOn)
                 .put("status", sessionStatus)
@@ -314,12 +318,25 @@ final class TheFixClientFixService implements Application, AutoCloseable {
                 .put("rawMessageLoggingEnabled", effectiveProfile.rawMessageLoggingEnabled());
     }
 
+    synchronized JsonObject sessionSnapshot() {
+        return sessionSnapshot(runtimeProfile);
+    }
+
+    synchronized String profileName() {
+        return runtimeProfile.name();
+    }
+
+    synchronized boolean isIdle() {
+        return !loggedOn && !connectionRequested && initiator == null && !autoFlowActive;
+    }
+
     synchronized JsonObject kpiSnapshot() {
         return new JsonObject()
                 .put("readyState", loggedOn ? "FIX live" : initiator != null ? "Connecting" : "UI ready")
                 .put("openOrders", pendingOrders())
                 .put("sentOrders", sentCount.get())
                 .put("executionReports", execReportCount.get())
+                .put("cancels", cancelCount.get())
                 .put("rejects", rejectCount.get())
                 .put("sendFailures", sendFailureCount.get())
                 .put("sessionUptime", formatUptime());
@@ -402,6 +419,14 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     public synchronized void close() {
         disconnect();
         autoFlowExecutor.shutdownNow();
+        try {
+            if (!autoFlowExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                log.warn("Timed out waiting for auto-flow executor shutdown for profile {}", runtimeProfile.name());
+            }
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            log.warn("Interrupted while waiting for auto-flow executor shutdown for profile {}", runtimeProfile.name(), interruptedException);
+        }
     }
 
     private void sendAutoFlowOrders() {
@@ -424,7 +449,8 @@ final class TheFixClientFixService implements Application, AutoCloseable {
                     completeAutoFlow();
                     return;
                 }
-                boolean sent = sendOrderInternal(template, true, false);
+                long variantSeed = sequence.incrementAndGet();
+                boolean sent = sendOrderInternal(template.bulkVariant(variantSeed), true, false);
                 if (sent && autoFlowRemaining > 0L) {
                     autoFlowRemaining--;
                     if (autoFlowRemaining == 0L) {
@@ -642,14 +668,6 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         }
     }
 
-    synchronized void onProfileActivated() {
-        TheFixSessionProfile activeProfile = profileStore.activeProfile();
-        if (initiator != null) {
-            addEvent("INFO", "Profile updated", "Active profile is now " + activeProfile.name() + ". Reconnect the FIX session to apply the new settings.");
-        } else {
-            addEvent("INFO", "Profile updated", "Active profile is now " + activeProfile.name() + '.');
-        }
-    }
 
     private void ensureQuickFixDirectories(TheFixSessionProfile profile) throws IOException {
         Files.createDirectories(profile.storeDir());
@@ -1115,12 +1133,14 @@ final class TheFixClientFixService implements Application, AutoCloseable {
                     .put("time", EVENT_TIME_FORMAT.format(createdAt))
                     .put("clOrdId", clOrdId)
                     .put("messageType", messageType)
+                    .put("messageTypeCode", messageTypeCode)
                     .put("symbol", symbol)
                     .put("side", side)
                     .put("quantity", quantity)
                     .put("limitPrice", String.format(Locale.US, "%.2f", limitPrice))
-                    .put("market", "")
-                    .put("currency", "")
+                    .put("region", region)
+                    .put("market", market)
+                    .put("currency", currency)
                     .put("status", status)
                     .put("execType", execType)
                     .put("cumQty", String.format(Locale.US, "%.0f", cumQty))

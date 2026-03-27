@@ -30,6 +30,7 @@ class TheFixClientFixServiceMessageClassificationTest {
                     new SessionID("FIX.4.4", "CLIENT", "SIM"));
 
             assertEquals(0L, service.kpiSnapshot().getLong("executionReports"));
+            assertEquals(0L, service.kpiSnapshot().getLong("cancels"));
             assertEquals(1L, service.kpiSnapshot().getLong("rejects"));
         }
     }
@@ -41,6 +42,7 @@ class TheFixClientFixServiceMessageClassificationTest {
                     new SessionID("FIX.4.4", "CLIENT", "SIM"));
 
             assertEquals(1L, service.kpiSnapshot().getLong("executionReports"));
+            assertEquals(0L, service.kpiSnapshot().getLong("cancels"));
             assertEquals(0L, service.kpiSnapshot().getLong("rejects"));
         }
     }

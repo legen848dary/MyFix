@@ -42,15 +42,20 @@ final class TheFixClientServer {
                 .put("mode", "live-fix-workstation")
                 .put("port", config.port())));
 
-        router.get("/api/overview").handler(ctx -> writeJson(ctx.response(), workbenchState.snapshot()));
+        router.get("/api/overview").handler(ctx -> writeJson(ctx.response(), workbenchState.snapshot(ctx.request().getParam("profileName"))));
         router.get("/api/fix-metadata").handler(ctx -> writeJson(ctx.response(), workbenchState.fixMetadataSnapshot()));
         router.get("/api/settings").handler(ctx -> writeJson(ctx.response(), workbenchState.settingsSnapshot()));
-        router.get("/api/templates").handler(ctx -> writeJson(ctx.response(), workbenchState.templateSnapshot()));
-        router.post("/api/session/connect").handler(ctx -> writeJson(ctx.response(), workbenchState.connect()));
-        router.post("/api/session/disconnect").handler(ctx -> writeJson(ctx.response(), workbenchState.disconnect()));
-        router.post("/api/session/pulse-test").handler(ctx -> writeJson(ctx.response(), workbenchState.pulseTest()));
+        router.get("/api/session-profiles").handler(ctx -> writeJson(ctx.response(), workbenchState.sessionProfilesSnapshot()));
+        router.get("/api/templates").handler(ctx -> writeJson(ctx.response(), workbenchState.templateSnapshot(ctx.request().getParam("profileName"))));
+        router.post("/api/session/connect").handler(ctx -> writeJson(ctx.response(), workbenchState.connect(bodyJson(ctx))));
+        router.post("/api/session/disconnect").handler(ctx -> writeJson(ctx.response(), workbenchState.disconnect(bodyJson(ctx))));
+        router.post("/api/session/pulse-test").handler(ctx -> writeJson(ctx.response(), workbenchState.pulseTest(bodyJson(ctx))));
         router.post("/api/settings/profiles/save").handler(ctx -> writeJson(ctx.response(), workbenchState.saveSettingsProfile(bodyJson(ctx))));
         router.post("/api/settings/profiles/activate").handler(ctx -> writeJson(ctx.response(), workbenchState.activateSettingsProfile(bodyJson(ctx))));
+        router.post("/api/settings/profiles/delete").handler(ctx -> writeJson(ctx.response(), workbenchState.deleteSettingsProfile(bodyJson(ctx))));
+        router.post("/api/session-profiles/save").handler(ctx -> writeJson(ctx.response(), workbenchState.saveSettingsProfile(bodyJson(ctx))));
+        router.post("/api/session-profiles/activate").handler(ctx -> writeJson(ctx.response(), workbenchState.activateSettingsProfile(bodyJson(ctx))));
+        router.post("/api/session-profiles/delete").handler(ctx -> writeJson(ctx.response(), workbenchState.deleteSettingsProfile(bodyJson(ctx))));
         router.post("/api/settings/storage-path").handler(ctx -> writeJson(ctx.response(), workbenchState.updateSettingsStoragePath(bodyJson(ctx))));
         router.post("/api/templates/save").handler(ctx -> writeJson(ctx.response(), workbenchState.saveMessageTemplate(bodyJson(ctx))));
         router.post("/api/order-ticket/preview").handler(ctx -> writeJson(ctx.response(), workbenchState.previewOrder(bodyJson(ctx))));
@@ -58,16 +63,16 @@ final class TheFixClientServer {
         router.post("/api/orders/amend").handler(ctx -> writeJson(ctx.response(), workbenchState.amendBlotterOrder(bodyJson(ctx))));
         router.post("/api/orders/cancel").handler(ctx -> writeJson(ctx.response(), workbenchState.cancelBlotterOrder(bodyJson(ctx))));
         router.post("/api/order-flow/start").handler(ctx -> writeJson(ctx.response(), workbenchState.startOrderFlow(bodyJson(ctx))));
-        router.post("/api/order-flow/stop").handler(ctx -> writeJson(ctx.response(), workbenchState.stopOrderFlow()));
+        router.post("/api/order-flow/stop").handler(ctx -> writeJson(ctx.response(), workbenchState.stopOrderFlow(bodyJson(ctx))));
 
         router.get("/api/fix-messages").handler(ctx -> {
             int limit = Math.max(1, Math.min(parseIntParam(ctx.request().getParam("limit"), 20), 100));
             int offset = Math.max(0, parseIntParam(ctx.request().getParam("offset"), 0));
-            writeJson(ctx.response(), workbenchState.recentFixMessages(limit, offset));
+            writeJson(ctx.response(), workbenchState.recentFixMessages(limit, offset, ctx.request().getParam("profileName")));
         });
 
-        router.getWithRegex("^/(home|neworder|order|orders|blotter|settings|recentfixmsgs)$").handler(ctx -> ctx.reroute("/index.html"));
-        router.getWithRegex("^/(home|neworder|order|orders|blotter|settings|recentfixmsgs)/$").handler(ctx -> ctx.response()
+        router.getWithRegex("^/(home|neworder|order|orders|blotter|settings|session-profiles|sessionprofiles|recentfixmsgs|about)$").handler(ctx -> ctx.reroute("/index.html"));
+        router.getWithRegex("^/(home|neworder|order|orders|blotter|settings|session-profiles|sessionprofiles|recentfixmsgs|about)/$").handler(ctx -> ctx.response()
                 .setStatusCode(308)
                 .putHeader("location", ctx.request().path().substring(0, ctx.request().path().length() - 1))
                 .end());

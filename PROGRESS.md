@@ -1,6 +1,6 @@
 # MyFix Progress Tracker
 
-Last updated: 2026-03-23
+Last updated: 2026-03-26
 
 ## Purpose
 
@@ -37,6 +37,22 @@ A new session should read this file first, then continue from the **Immediate ne
   - guarded baseline updates now create/reuse an immutable `latency-known-good-<commit>` tag
   - guarded baseline updates now refuse slower baseline overwrites unless explicitly allowed with `--allow-regression`
   - `LATENCY_BASELINE.md` now keeps a datetime-sorted history table of accepted 500 msg/s p50/p75/p90 checkpoints
+- Milestone 1 is now complete in `TheFixClient`:
+  - added a dedicated `/session-profiles` page and route
+  - moved FIX connectivity/profile editing out of `Settings`
+  - reduced `Settings` to workspace-only controls
+  - added separate overview payload sections for `settings` and `sessionProfiles`
+  - preserved the existing single-session runtime/connectivity behavior
+- Milestone 2 runtime checkpoint is now complete in `TheFixClient`:
+  - introduced profile-targeted multi-session runtime handling (one live runtime per saved profile)
+  - overview/session actions can now target an explicit `profileName`
+  - session-scoped pages now reload overview/templates/FIX messages for the selected profile
+  - added `runtimeSessions` to the overview payload so active runtimes are observable
+- Milestone 3 UX checkpoint is now complete in `TheFixClient`:
+  - session-scoped pages now render a compact runtime roster using `runtimeSessions`
+  - operators can see all active runtimes, selection state, endpoint, FIX version, and status at a glance
+  - the selected profile strip now has clearer per-profile connect/disconnect controls
+  - runtime cards now expose explicit select + connect/disconnect affordances
 - Once all verification commands below are green, it is safe to commit and push the checkpoint.
 
 ## Latest verified green state
@@ -82,6 +98,29 @@ Verified on: 2026-03-23
   - `./scripts/status_web_stack.sh` when both stacks are stopped
   - `./scripts/status_web_stack.sh` when the Docker web stack is running
   - `./scripts/status_web_stack.sh` when the direct JVM web stack is running
+- Milestone 1 client split green via:
+  - `./gradlew --no-daemon :TheFixClient:test --tests com.insoftu.thefix.client.TheFixClientWorkbenchStateTest --tests com.insoftu.thefix.client.TheFixClientServerRoutingTest --tests com.insoftu.thefix.client.TheFixSessionProfileStoreTest`
+  - `./gradlew --no-daemon :TheFixClient:test`
+  - `./gradlew --no-daemon :TheFixClient:run`
+  - `GET http://localhost:8081/api/overview` showing separate `settings` + `sessionProfiles`
+  - `GET http://localhost:8081/api/settings`
+  - `GET http://localhost:8081/api/session-profiles`
+  - `GET http://localhost:8081/session-profiles`
+- Milestone 2 multi-session checkpoint green via:
+  - `./gradlew --no-daemon :TheFixClient:test --tests com.insoftu.thefix.client.TheFixClientWorkbenchStateTest --tests com.insoftu.thefix.client.TheFixClientServerRoutingTest --tests com.insoftu.thefix.client.TheFixSessionProfileStoreTest`
+  - fresh `TheFixClient` test XML results under `TheFixClient/build/test-results/test/` show `failures="0" errors="0"` for:
+    - `TheFixClientWorkbenchStateTest` (11 tests, including multi-session snapshot coverage)
+    - `TheFixClientServerRoutingTest`
+    - `TheFixClientLiveIntegrationTest`
+    - `TheFixClientFixServiceBulkFlowDisconnectTest`
+    - `TheFixClientFixServiceMessageClassificationTest`
+- Milestone 3 runtime-roster UX checkpoint green via:
+  - `./gradlew --no-daemon :TheFixClient:test --tests com.insoftu.thefix.client.TheFixClientServerRoutingTest --tests com.insoftu.thefix.client.TheFixClientWorkbenchStateTest`
+  - fresh test XML timestamps under `TheFixClient/build/test-results/test/` confirming `failures="0" errors="0"` for:
+    - `TheFixClientServerRoutingTest`
+    - `TheFixClientWorkbenchStateTest`
+    - `TheFixClientApplicationTest`
+    - `TheFixClientLiveIntegrationTest`
 
 ### Important fix landed during verification
 
@@ -199,6 +238,63 @@ Key files:
 - `scripts/start_web_stack.sh`
 - `scripts/stop_web_stack.sh`
 - `scripts/status_web_stack.sh`
+
+### Milestone 1 — Split workspace Settings from Session Profiles
+Status: Completed
+
+What was done:
+- Added a first-class `Session Profiles` page to `TheFixClient`
+- Moved FIX session/profile editing UI out of `Settings`
+- Kept `Settings` focused on workspace-level concerns such as profile storage path and browser-managed preferences
+- Added separate backend/API snapshot sections for workspace settings vs session profiles
+- Added a compact session-profile strip on session-scoped pages
+- Preserved current single-session runtime behavior for connect/disconnect/order flow
+
+Key files:
+- `TheFixClient/src/main/resources/web/app.js`
+- `TheFixClient/src/main/java/com/insoftu/thefix/client/TheFixClientServer.java`
+- `TheFixClient/src/main/java/com/insoftu/thefix/client/TheFixClientWorkbenchState.java`
+- `TheFixClient/src/main/java/com/insoftu/thefix/client/TheFixSessionProfileStore.java`
+- `TheFixClient/src/test/java/com/insoftu/thefix/client/TheFixClientWorkbenchStateTest.java`
+- `TheFixClient/src/test/java/com/insoftu/thefix/client/TheFixClientServerRoutingTest.java`
+
+### Milestone 2 — Profile-targeted multi-session runtime
+Status: Completed
+
+What was done:
+- Reworked `TheFixClient` backend to manage multiple runtime FIX services keyed by saved profile name
+- Added profile-targeted overview/session/template/FIX-message flows
+- Added `runtimeSessions` into the overview payload
+- Updated the browser client so session-scoped pages operate against the selected profile
+- Kept Milestone 1 page split intact (`Session Profiles` vs workspace `Settings`)
+
+Current runtime model:
+- one live runtime per saved profile name
+- APIs target profiles via `profileName`
+- UI session-scoped pages switch context by selected profile
+
+Key files:
+- `TheFixClient/src/main/java/com/insoftu/thefix/client/TheFixClientFixService.java`
+- `TheFixClient/src/main/java/com/insoftu/thefix/client/TheFixClientWorkbenchState.java`
+- `TheFixClient/src/main/java/com/insoftu/thefix/client/TheFixClientServer.java`
+- `TheFixClient/src/main/java/com/insoftu/thefix/client/TheFixSessionProfileStore.java`
+- `TheFixClient/src/main/resources/web/app.js`
+- `TheFixClient/src/test/java/com/insoftu/thefix/client/TheFixClientWorkbenchStateTest.java`
+- `TheFixClient/src/test/java/com/insoftu/thefix/client/TheFixClientServerRoutingTest.java`
+
+### Milestone 3 — Multi-session runtime roster UX
+Status: Completed
+
+What was done:
+- Surfaced `runtimeSessions` in the web client
+- Added a compact runtime roster to session-scoped pages
+- Added clearer operator controls for selecting a profile runtime vs connecting/disconnecting it
+- Kept the existing profile-targeted backend contract unchanged (`profileName` remains the runtime identity)
+
+Key files:
+- `TheFixClient/src/main/resources/web/app.js`
+- `TheFixClient/src/main/resources/web/index.html`
+- `TheFixClient/src/test/java/com/insoftu/thefix/client/TheFixClientServerRoutingTest.java`
 
 ## Verified behavior to preserve
 
@@ -356,17 +452,18 @@ User requested:
 
 ## Immediate next tasks
 
-1. Improve combined web-stack polish/docs/tests as needed
-2. Keep the terminal demo FIX client available as an explicit opt-in workflow only
-3. Consider adding optional combined-stack support for the terminal demo FIX client when explicitly requested
-4. Use `LATENCY_BASELINE.md` as the source of truth for the last good `p90 < 10 µs` commit during future optimization passes
-5. On the next chat, start from this now-green checkpoint and rerun any verification commands needed before making further changes
+1. Decide whether to promote `profileName` runtime identity into a first-class generated `sessionId`
+2. Extend server/UI tests for richer multi-session page behavior as needed
+3. Consider adding per-runtime message/order counters directly in the roster cards
+4. Keep the terminal demo FIX client available as an explicit opt-in workflow only
+5. Use `LATENCY_BASELINE.md` as the source of truth for the last good `p90 < 10 µs` commit during future optimization passes
+6. On the next chat, start from this now-green Milestone 3 checkpoint and rerun any verification commands needed before making further changes
 
 ## If a new chat session resumes from here
 
 Suggested prompt:
 
 ```text
-Read PROGRESS.md and resume from the Immediate next tasks section. Note that the latest tracker update was documentation-only, so the last verified green state is still the one recorded there. Verify the latest green state if needed, then continue improving the combined web-stack workflows and any related container/runtime polish.
+Read PROGRESS.md and resume from the Immediate next tasks section. Milestone 3 (multi-session runtime roster UX) is complete and verified green for `TheFixClient`. Verify the recorded client checks if needed, then continue with runtime identity promotion or richer multi-session operator workflows.
 ```
 

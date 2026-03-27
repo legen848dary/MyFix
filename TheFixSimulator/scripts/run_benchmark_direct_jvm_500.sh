@@ -27,6 +27,21 @@ extract_metric() {
   printf '%s\n' "$output" | awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1); exit }'
 }
 
+format_elapsed_duration() {
+  local total_seconds="$1"
+  local hours=$(( total_seconds / 3600 ))
+  local minutes=$(( (total_seconds % 3600) / 60 ))
+  local seconds=$(( total_seconds % 60 ))
+
+  if (( hours > 0 )); then
+    printf '%dh %dm %ds' "$hours" "$minutes" "$seconds"
+  elif (( minutes > 0 )); then
+    printf '%dm %ds' "$minutes" "$seconds"
+  else
+    printf '%ds' "$seconds"
+  fi
+}
+
 ensure_clean_git_state() {
   local status
   status="$(cd "$PROJECT_ROOT" && "$GIT_BIN" --no-pager status --short)"
@@ -264,13 +279,18 @@ if [[ "$BUILD_FIRST" == true ]]; then
   runner_args=(--build "${runner_args[@]}")
 fi
 
+benchmark_started_epoch="$(date +%s)"
 output="$(bash "$RUNNER" "${runner_args[@]}")"
+benchmark_finished_epoch="$(date +%s)"
+benchmark_elapsed_sec=$(( benchmark_finished_epoch - benchmark_started_epoch ))
+benchmark_elapsed_human="$(format_elapsed_duration "$benchmark_elapsed_sec")"
 
 printf '%s\n' "$output" | awk -F= '
   /^p50LatencyUs=/ { print }
   /^p75LatencyUs=/ { print }
   /^p90LatencyUs=/ { print }
 '
+printf 'Time taken: %s\n' "$benchmark_elapsed_human"
 
 if [[ "$UPDATE_BASELINE" != true ]]; then
   exit 0

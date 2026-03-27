@@ -41,6 +41,14 @@ final class TheFixSessionProfileStore {
         return profiles.get(activeProfileName);
     }
 
+    synchronized TheFixSessionProfile profile(String profileName) {
+        if (profileName == null || profileName.isBlank()) {
+            return activeProfile();
+        }
+        TheFixSessionProfile profile = profiles.get(profileName.trim());
+        return profile != null ? profile : activeProfile();
+    }
+
     synchronized JsonObject snapshot() {
         JsonArray items = new JsonArray();
         for (TheFixSessionProfile profile : profiles.values()) {
@@ -59,11 +67,22 @@ final class TheFixSessionProfileStore {
                 .put("profileDraft", activeProfile().toJson());
     }
 
+    synchronized JsonObject workspaceSnapshot() {
+        return new JsonObject()
+                .put("storagePath", storagePath.toString())
+                .put("defaultStoragePath", defaultStoragePath.toString())
+                .put("profileCount", profiles.size());
+    }
+
     synchronized void saveProfile(JsonObject request) {
+        String originalName = request == null ? null : normalizeName(request.getString("originalName"));
         TheFixSessionProfile profile = TheFixSessionProfile.fromJson(request, config);
+        if (originalName != null && !originalName.equals(profile.name())) {
+            profiles.remove(originalName);
+        }
         profiles.put(profile.name(), profile);
         boolean activate = request == null || !request.containsKey("activate") || request.getBoolean("activate", true);
-        if (activate || activeProfileName == null || activeProfileName.isBlank()) {
+        if (activate || activeProfileName == null || activeProfileName.isBlank() || profile.name().equals(originalName) || originalName != null && originalName.equals(activeProfileName)) {
             activeProfileName = profile.name();
         }
         persistQuietly();
@@ -75,6 +94,19 @@ final class TheFixSessionProfileStore {
         }
         activeProfileName = profileName;
         persistQuietly();
+    }
+
+    synchronized boolean deleteProfile(String profileName) {
+        String normalizedName = normalizeName(profileName);
+        if (normalizedName == null || profiles.size() <= 1 || !profiles.containsKey(normalizedName)) {
+            return false;
+        }
+        profiles.remove(normalizedName);
+        if (normalizedName.equals(activeProfileName)) {
+            activeProfileName = profiles.keySet().iterator().next();
+        }
+        persistQuietly();
+        return true;
     }
 
     synchronized void updateStoragePath(String requestedPath) {
@@ -156,6 +188,13 @@ final class TheFixSessionProfileStore {
 
     private static Path storeFile(Path path) {
         return path.resolve(STORE_FILE_NAME);
+    }
+
+    private static String normalizeName(String profileName) {
+        if (profileName == null || profileName.isBlank()) {
+            return null;
+        }
+        return profileName.trim();
     }
 }
 

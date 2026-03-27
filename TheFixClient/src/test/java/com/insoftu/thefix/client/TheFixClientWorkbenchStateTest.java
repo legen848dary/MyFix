@@ -24,7 +24,98 @@ class TheFixClientWorkbenchStateTest {
         assertFalse(snapshot.getJsonObject("session").getBoolean("connected"));
         assertEquals("localhost", snapshot.getJsonObject("session").getString("host"));
         assertEquals("THEFIX_TRDR01", snapshot.getJsonObject("session").getString("senderCompId"));
-        assertEquals("Default profile", snapshot.getJsonObject("settings").getString("activeProfileName"));
+        assertEquals("Default profile", snapshot.getJsonObject("sessionProfiles").getString("activeProfileName"));
+        assertTrue(snapshot.getJsonObject("settings").getInteger("profileCount") >= 1);
+        state.close();
+    }
+
+    @Test
+    void settingsAndSessionProfilesSnapshotsArePublishedSeparately() {
+        TheFixClientWorkbenchState state = createState();
+
+        JsonObject settingsSnapshot = state.settingsSnapshot();
+        JsonObject sessionProfilesSnapshot = state.sessionProfilesSnapshot();
+
+        assertNotNull(settingsSnapshot.getJsonObject("settings"));
+        assertEquals(tempDir.toString(), settingsSnapshot.getJsonObject("settings").getString("storagePath"));
+        assertNotNull(sessionProfilesSnapshot.getJsonObject("sessionProfiles"));
+        assertEquals("Default profile", sessionProfilesSnapshot.getJsonObject("sessionProfiles").getString("activeProfileName"));
+        state.close();
+    }
+
+    @Test
+    void snapshotCanTargetSpecificProfilesAndTrackMultipleRuntimeSessions() {
+        TheFixClientWorkbenchState state = createState();
+
+        state.saveSettingsProfile(new JsonObject()
+                .put("name", "LDN session")
+                .put("senderCompId", "THEFIX_LDN01")
+                .put("targetCompId", "LLEXSIM")
+                .put("fixHost", "127.0.0.1")
+                .put("fixPort", 9988)
+                .put("fixVersionCode", "FIX_44")
+                .put("resetOnLogon", true)
+                .put("sessionStartTime", "06:00:00")
+                .put("sessionEndTime", "16:30:00")
+                .put("heartBtIntSec", 30)
+                .put("reconnectIntervalSec", 5)
+                .put("activate", false));
+
+        state.connect(new JsonObject().put("profileName", "Default profile"));
+        state.connect(new JsonObject().put("profileName", "LDN session"));
+
+        JsonObject ldnSnapshot = state.snapshot("LDN session");
+
+        assertEquals("LDN session", ldnSnapshot.getJsonObject("session").getString("profileName"));
+        assertEquals(9988, ldnSnapshot.getJsonObject("session").getInteger("port"));
+        assertEquals(2, ldnSnapshot.getJsonObject("settings").getInteger("profileCount"));
+        assertEquals(2, ldnSnapshot.getJsonArray("runtimeSessions").size());
+        assertTrue(ldnSnapshot.getJsonArray("runtimeSessions").stream()
+                .map(JsonObject.class::cast)
+                .anyMatch(item -> "LDN session".equals(item.getString("profileName"))));
+        state.close();
+    }
+
+    @Test
+    void deletingADisconnectedProfileRemovesItFromThePublishedSnapshot() {
+        TheFixClientWorkbenchState state = createState();
+
+        state.saveSettingsProfile(new JsonObject()
+                .put("name", "LDN session")
+                .put("senderCompId", "THEFIX_LDN01")
+                .put("targetCompId", "LLEXSIM")
+                .put("fixHost", "127.0.0.1")
+                .put("fixPort", 9988)
+                .put("fixVersionCode", "FIX_44")
+                .put("activate", false));
+
+        JsonObject response = state.deleteSettingsProfile(new JsonObject().put("name", "LDN session"));
+
+        assertTrue(response.getJsonObject("actionResult").getBoolean("success"));
+        assertFalse(response.getJsonObject("sessionProfiles").getJsonArray("profiles").stream()
+                .map(JsonObject.class::cast)
+                .anyMatch(item -> "LDN session".equals(item.getString("name"))));
+        state.close();
+    }
+
+    @Test
+    void deletingAConnectedProfileIsRejectedUntilTheSessionIsDisconnected() {
+        TheFixClientWorkbenchState state = createState();
+
+        state.saveSettingsProfile(new JsonObject()
+                .put("name", "LDN session")
+                .put("senderCompId", "THEFIX_LDN01")
+                .put("targetCompId", "LLEXSIM")
+                .put("fixHost", "127.0.0.1")
+                .put("fixPort", 9988)
+                .put("fixVersionCode", "FIX_44")
+                .put("activate", false));
+        state.connect(new JsonObject().put("profileName", "LDN session"));
+
+        JsonObject response = state.deleteSettingsProfile(new JsonObject().put("name", "LDN session"));
+
+        assertFalse(response.getJsonObject("actionResult").getBoolean("success"));
+        assertTrue(response.getJsonObject("actionResult").getString("message").contains("Disconnect"));
         state.close();
     }
 
@@ -173,7 +264,7 @@ class TheFixClientWorkbenchStateTest {
     }
 
     @Test
-    void sendOrderAutoSavesATemplateForValidSingleMessages() {
+    void sendOrderDoesNotPersistATemplateWithoutExplicitSave() {
         TheFixClientWorkbenchState state = createState();
 
         state.sendOrder(new JsonObject()
@@ -192,10 +283,7 @@ class TheFixClientWorkbenchStateTest {
 
         JsonObject templateSnapshot = state.templateSnapshot().getJsonObject("templates");
         assertNotNull(templateSnapshot);
-        assertEquals(1, templateSnapshot.getJsonArray("items").size());
-        JsonObject template = templateSnapshot.getJsonArray("items").getJsonObject(0);
-        assertTrue(template.getBoolean("autoSaved"));
-        assertEquals("MSFT", template.getJsonObject("draft").getString("symbol"));
+        assertEquals(0, templateSnapshot.getJsonArray("items").size());
         state.close();
     }
 

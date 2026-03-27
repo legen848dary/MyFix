@@ -9,6 +9,7 @@ import java.text.NumberFormat;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Currency;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -78,7 +79,7 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
     private final TheFixClientConfig config;
     private final TheFixSessionProfileStore profileStore;
     private final TheFixMessageTemplateStore templateStore;
-    private final TheFixClientFixService fixService;
+    private final LinkedHashMap<String, TheFixClientFixService> fixServices = new LinkedHashMap<>();
 
     private int pulseChecks;
 
@@ -94,11 +95,16 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         this.config = config;
         this.profileStore = profileStore;
         this.templateStore = templateStore;
-        this.fixService = new TheFixClientFixService(config, profileStore);
     }
 
     synchronized JsonObject snapshot() {
-        JsonObject kpis = fixService.kpiSnapshot();
+        return snapshot(activeProfileName());
+    }
+
+    synchronized JsonObject snapshot(String selectedProfileName) {
+        TheFixSessionProfile selectedProfile = profileForName(selectedProfileName);
+        TheFixClientFixService selectedService = fixServices.get(selectedProfile.name());
+        JsonObject kpis = selectedService == null ? idleKpiSnapshot() : selectedService.kpiSnapshot();
         kpis.put("pulseChecks", pulseChecks);
 
         return new JsonObject()
@@ -106,50 +112,86 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
                 .put("subtitle", "Electronic execution workstation")
                 .put("environment", "Live simulator-linked FIX order workstation")
                 .put("generatedAt", Instant.now().toString())
-                .put("session", fixService.sessionSnapshot())
+                .put("session", selectedService == null ? idleSessionSnapshot(selectedProfile) : selectedService.sessionSnapshot(selectedProfile))
+                .put("runtimeSessions", runtimeSessionsSnapshot(selectedProfile.name()))
                 .put("kpis", kpis)
-                .put("recentEvents", fixService.recentEventsJson())
-                .put("recentOrders", fixService.recentOrdersJson())
+                .put("recentEvents", selectedService == null ? new JsonArray() : selectedService.recentEventsJson())
+                .put("recentOrders", selectedService == null ? new JsonArray() : selectedService.recentOrdersJson())
                 .put("referenceData", buildReferenceData())
-                .put("settings", profileStore.snapshot())
+                .put("settings", workspaceSettingsSnapshot())
+                .put("sessionProfiles", profileStore.snapshot())
                 .put("defaults", new JsonObject()
                         .put("defaultFlowRate", config.defaultRatePerSecond())
                         .put("bulkMode", "FIXED_RATE")
                         .put("order", defaultOrderJson()));
     }
 
+    synchronized JsonObject connect(JsonObject request) {
+        TheFixSessionProfile selectedProfile = profileForRequest(request);
+        JsonObject conflict = rejectOrResolveSessionIdentityConflict(selectedProfile, "connect");
+        if (conflict != null) {
+            return conflict;
+        }
+        serviceForProfile(selectedProfile.name()).connect();
+        return snapshot(selectedProfile.name());
+    }
+
     synchronized JsonObject connect() {
-        fixService.connect();
-        return snapshot();
+        return connect(new JsonObject());
+    }
+
+    synchronized JsonObject disconnect(JsonObject request) {
+        TheFixSessionProfile selectedProfile = profileForRequest(request);
+        TheFixClientFixService service = fixServices.get(selectedProfile.name());
+        if (service != null) {
+            service.disconnect();
+            if (service.isIdle()) {
+                fixServices.remove(selectedProfile.name());
+            }
+        }
+        return snapshot(selectedProfile.name());
     }
 
     synchronized JsonObject disconnect() {
-        fixService.disconnect();
-        return snapshot();
+        return disconnect(new JsonObject());
+    }
+
+    synchronized JsonObject pulseTest(JsonObject request) {
+        TheFixSessionProfile selectedProfile = profileForRequest(request);
+        pulseChecks++;
+        TheFixClientFixService service = fixServices.get(selectedProfile.name());
+        if (service != null) {
+            service.pulseTest();
+        }
+        return snapshot(selectedProfile.name());
     }
 
     synchronized JsonObject pulseTest() {
-        pulseChecks++;
-        fixService.pulseTest();
-        return snapshot();
+        return pulseTest(new JsonObject());
     }
 
     synchronized JsonObject sendOrder(JsonObject request) {
+        TheFixSessionProfile selectedProfile = profileForRequest(request);
+        JsonObject conflict = rejectOrResolveSessionIdentityConflict(selectedProfile, "send");
+        if (conflict != null) {
+            return conflict;
+        }
         OrderPreview preview = buildPreview(request);
         if (!preview.warnings().isEmpty()) {
-            return snapshot();
+            return snapshot(selectedProfile.name());
         }
-        templateStore.autoSaveTemplate(activeProfileName(), orderDraftJson(preview.toOrderRequest()));
-        fixService.sendOrder(preview.toOrderRequest());
-        return snapshot();
+        serviceForProfile(selectedProfile.name()).sendOrder(preview.toOrderRequest());
+        return snapshot(selectedProfile.name());
     }
 
     synchronized JsonObject amendBlotterOrder(JsonObject request) {
+        TheFixSessionProfile selectedProfile = profileForRequest(request);
         String clOrdId = request == null ? null : request.getString("clOrdId");
         int quantity = request == null ? 0 : parseInt(request, "quantity", 0);
         double price = resolveDouble(request, "price", 0d);
-        boolean success = clOrdId != null && !clOrdId.isBlank() && quantity > 0 && price >= 0d && fixService.amendOrder(clOrdId, quantity, price);
-        return snapshot().put("actionResult", new JsonObject()
+        TheFixClientFixService service = fixServices.get(selectedProfile.name());
+        boolean success = clOrdId != null && !clOrdId.isBlank() && quantity > 0 && price >= 0d && service != null && service.amendOrder(clOrdId, quantity, price);
+        return snapshot(selectedProfile.name()).put("actionResult", new JsonObject()
                 .put("success", success)
                 .put("type", "amend")
                 .put("clOrdId", clOrdId == null ? "" : clOrdId)
@@ -157,9 +199,11 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
     }
 
     synchronized JsonObject cancelBlotterOrder(JsonObject request) {
+        TheFixSessionProfile selectedProfile = profileForRequest(request);
         String clOrdId = request == null ? null : request.getString("clOrdId");
-        boolean success = clOrdId != null && !clOrdId.isBlank() && fixService.cancelOrder(clOrdId);
-        return snapshot().put("actionResult", new JsonObject()
+        TheFixClientFixService service = fixServices.get(selectedProfile.name());
+        boolean success = clOrdId != null && !clOrdId.isBlank() && service != null && service.cancelOrder(clOrdId);
+        return snapshot(selectedProfile.name()).put("actionResult", new JsonObject()
                 .put("success", success)
                 .put("type", "cancel")
                 .put("clOrdId", clOrdId == null ? "" : clOrdId)
@@ -167,9 +211,14 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
     }
 
     synchronized JsonObject startOrderFlow(JsonObject request) {
+        TheFixSessionProfile selectedProfile = profileForRequest(request);
+        JsonObject conflict = rejectOrResolveSessionIdentityConflict(selectedProfile, "bulk-flow");
+        if (conflict != null) {
+            return conflict;
+        }
         OrderPreview preview = buildPreview(request);
         if (!preview.warnings().isEmpty() || !preview.toOrderRequest().messageType().supportsBulk()) {
-            return snapshot();
+            return snapshot(selectedProfile.name());
         }
         String bulkMode = sanitizeCode(request == null ? null : request.getString("bulkMode"), "FIXED_RATE");
         int requestedRate = parsePositiveInt(request, "ratePerSecond", config.defaultRatePerSecond());
@@ -179,41 +228,60 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         if (!VALID_BULK_MODE_CODES.contains(bulkMode)) {
             bulkMode = "FIXED_RATE";
         }
-        fixService.startAutoFlow(preview.toOrderRequest(), new TheFixBulkOptions(
+        serviceForProfile(selectedProfile.name()).startAutoFlow(preview.toOrderRequest(), new TheFixBulkOptions(
                 bulkMode,
                 requestedRate,
                 burstSize,
                 burstIntervalMs,
                 totalOrders
         ));
-        return snapshot();
+        return snapshot(selectedProfile.name());
+    }
+
+    synchronized JsonObject stopOrderFlow(JsonObject request) {
+        TheFixSessionProfile selectedProfile = profileForRequest(request);
+        TheFixClientFixService service = fixServices.get(selectedProfile.name());
+        if (service != null) {
+            service.stopAutoFlow();
+        }
+        return snapshot(selectedProfile.name());
     }
 
     synchronized JsonObject stopOrderFlow() {
-        fixService.stopAutoFlow();
-        return snapshot();
+        return stopOrderFlow(new JsonObject());
     }
 
     synchronized JsonObject previewOrder(JsonObject request) {
-        return buildPreview(request).toJson(fixService.isLoggedOn());
+        TheFixSessionProfile selectedProfile = profileForRequest(request);
+        TheFixClientFixService service = fixServices.get(selectedProfile.name());
+        return buildPreview(request).toJson(service != null && service.isLoggedOn());
     }
 
     synchronized JsonObject settingsSnapshot() {
-        return new JsonObject().put("settings", profileStore.snapshot());
+        return new JsonObject().put("settings", workspaceSettingsSnapshot());
+    }
+
+    synchronized JsonObject sessionProfilesSnapshot() {
+        return new JsonObject().put("sessionProfiles", profileStore.snapshot());
+    }
+
+    synchronized JsonObject templateSnapshot(String profileName) {
+        return new JsonObject().put("templates", templateStore.snapshot(profileForName(profileName).name()));
     }
 
     synchronized JsonObject templateSnapshot() {
-        return new JsonObject().put("templates", templateStore.snapshot(activeProfileName()));
+        return templateSnapshot(activeProfileName());
     }
 
     synchronized JsonObject saveMessageTemplate(JsonObject request) {
         JsonObject effectiveRequest = request == null ? new JsonObject() : request;
+        String profileName = profileForRequest(effectiveRequest).name();
         TheFixMessageTemplate savedTemplate = templateStore.saveManualTemplate(
-                activeProfileName(),
+                profileName,
                 effectiveRequest.getString("name"),
                 effectiveRequest.getJsonObject("draft", defaultOrderJson())
         );
-        return templateSnapshot().put("savedTemplateId", savedTemplate.id());
+        return templateSnapshot(profileName).put("savedTemplateId", savedTemplate.id());
     }
 
     synchronized JsonObject fixMetadataSnapshot() {
@@ -222,30 +290,199 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
 
     synchronized JsonObject saveSettingsProfile(JsonObject request) {
         profileStore.saveProfile(request == null ? new JsonObject() : request);
-        fixService.onProfileActivated();
-        return snapshot();
+        String savedProfileName = trimToNull(request == null ? null : request.getString("name"));
+        return snapshot(savedProfileName == null ? activeProfileName() : savedProfileName);
     }
 
     synchronized JsonObject activateSettingsProfile(JsonObject request) {
         profileStore.activateProfile(request == null ? null : request.getString("name"));
-        fixService.onProfileActivated();
-        return snapshot();
+        return snapshot(profileForRequest(request).name());
+    }
+
+    synchronized JsonObject deleteSettingsProfile(JsonObject request) {
+        String profileName = trimToNull(request == null ? null : request.getString("name"));
+        if (profileName == null) {
+            return snapshot().put("actionResult", new JsonObject()
+                    .put("success", false)
+                    .put("type", "delete-profile")
+                    .put("profileName", "")
+                    .put("message", "Profile name is required."));
+        }
+
+        TheFixClientFixService service = fixServices.get(profileName);
+        if (service != null && !service.isIdle()) {
+            return snapshot(profileName).put("actionResult", new JsonObject()
+                    .put("success", false)
+                    .put("type", "delete-profile")
+                    .put("profileName", profileName)
+                    .put("message", "Disconnect the session before deleting its profile."));
+        }
+
+        boolean success = profileStore.deleteProfile(profileName);
+        if (success) {
+            TheFixClientFixService removedService = fixServices.remove(profileName);
+            if (removedService != null) {
+                removedService.close();
+            }
+        }
+
+        return snapshot().put("actionResult", new JsonObject()
+                .put("success", success)
+                .put("type", "delete-profile")
+                .put("profileName", profileName)
+                .put("message", success
+                        ? "Session profile deleted."
+                        : "Unable to delete the selected session profile."));
     }
 
     synchronized JsonObject updateSettingsStoragePath(JsonObject request) {
         profileStore.updateStoragePath(request == null ? null : request.getString("storagePath"));
-        fixService.onProfileActivated();
         return snapshot();
     }
 
     @Override
     public synchronized void close() {
-        fixService.close();
+        for (TheFixClientFixService service : fixServices.values()) {
+            service.close();
+        }
+        fixServices.clear();
         templateStore.close();
     }
 
     private String activeProfileName() {
         return profileStore.activeProfile().name();
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
+    }
+
+    private TheFixSessionProfile profileForRequest(JsonObject request) {
+        return profileForName(request == null ? null : request.getString("profileName"));
+    }
+
+    private TheFixSessionProfile profileForName(String profileName) {
+        return profileStore.profile(profileName);
+    }
+
+    private TheFixClientFixService serviceForProfile(String profileName) {
+        TheFixSessionProfile profile = profileForName(profileName);
+        return fixServices.computeIfAbsent(profile.name(), ignored -> new TheFixClientFixService(config, profile));
+    }
+
+    private JsonObject rejectOrResolveSessionIdentityConflict(TheFixSessionProfile selectedProfile, String actionType) {
+        List<String> conflicts = conflictingOperationalProfiles(selectedProfile);
+        if (conflicts.isEmpty()) {
+            return null;
+        }
+
+        TheFixClientFixService selectedService = fixServices.get(selectedProfile.name());
+        if (selectedService != null && !selectedService.isIdle()) {
+            disconnectAndRemoveProfiles(conflicts);
+            return null;
+        }
+
+        String conflictingProfileName = conflicts.getFirst();
+        String actionLabel = switch (actionType) {
+            case "bulk-flow" -> "start bulk flow";
+            case "send" -> "route orders";
+            default -> "connect";
+        };
+        return snapshot(selectedProfile.name()).put("actionResult", new JsonObject()
+                .put("success", false)
+                .put("type", actionType)
+                .put("profileName", selectedProfile.name())
+                .put("conflictingProfileName", conflictingProfileName)
+                .put("message", "Cannot " + actionLabel + " for profile \"" + selectedProfile.name()
+                        + "\" while profile \"" + conflictingProfileName
+                        + "\" is already using the same FIX session identity (BeginString/SenderCompID/TargetCompID)."));
+    }
+
+    private List<String> conflictingOperationalProfiles(TheFixSessionProfile selectedProfile) {
+        List<String> conflicts = new ArrayList<>();
+        for (Map.Entry<String, TheFixClientFixService> entry : fixServices.entrySet()) {
+            if (entry.getKey().equals(selectedProfile.name()) || entry.getValue().isIdle()) {
+                continue;
+            }
+            TheFixSessionProfile candidateProfile = profileForName(entry.getKey());
+            if (sameSessionIdentity(selectedProfile, candidateProfile)) {
+                conflicts.add(candidateProfile.name());
+            }
+        }
+        return conflicts;
+    }
+
+    private void disconnectAndRemoveProfiles(List<String> profileNames) {
+        for (String profileName : profileNames) {
+            TheFixClientFixService service = fixServices.remove(profileName);
+            if (service == null) {
+                continue;
+            }
+            service.close();
+        }
+    }
+
+    private static boolean sameSessionIdentity(TheFixSessionProfile left, TheFixSessionProfile right) {
+        return left.beginString().equals(right.beginString())
+                && left.senderCompId().equals(right.senderCompId())
+                && left.targetCompId().equals(right.targetCompId());
+    }
+
+    private JsonObject workspaceSettingsSnapshot() {
+        return profileStore.workspaceSnapshot();
+    }
+
+    private JsonObject idleSessionSnapshot(TheFixSessionProfile profile) {
+        return new JsonObject()
+                .put("connected", false)
+                .put("status", "Standby")
+                .put("host", profile.fixHost())
+                .put("port", profile.fixPort())
+                .put("beginString", profile.beginString())
+                .put("senderCompId", profile.senderCompId())
+                .put("targetCompId", profile.targetCompId())
+                .put("profileName", profile.name())
+                .put("activeProfileName", profileStore.activeProfile().name())
+                .put("pendingProfileChange", false)
+                .put("fixVersionCode", profile.fixVersionCode())
+                .put("fixVersionLabel", profile.fixVersion().label())
+                .put("mode", "QuickFIX/J initiator")
+                .put("uptime", "Not connected")
+                .put("autoFlowActive", false)
+                .put("autoFlowRate", 0)
+                .put("autoFlowMode", "OFF")
+                .put("autoFlowBurstSize", 0)
+                .put("autoFlowBurstIntervalMs", 0)
+                .put("autoFlowTotalOrders", 0)
+                .put("autoFlowRemaining", 0)
+                .put("autoFlowDescriptor", "Inactive")
+                .put("rawMessageLoggingEnabled", profile.rawMessageLoggingEnabled());
+    }
+
+    private JsonObject idleKpiSnapshot() {
+        return new JsonObject()
+                .put("readyState", "UI ready")
+                .put("openOrders", 0)
+                .put("sentOrders", 0)
+                .put("executionReports", 0)
+                .put("cancels", 0)
+                .put("rejects", 0)
+                .put("sendFailures", 0)
+                .put("sessionUptime", "Not connected");
+    }
+
+    private JsonArray runtimeSessionsSnapshot(String selectedProfileName) {
+        JsonArray items = new JsonArray();
+        for (Map.Entry<String, TheFixClientFixService> entry : fixServices.entrySet()) {
+            TheFixSessionProfile configuredProfile = profileForName(entry.getKey());
+            JsonObject snapshot = entry.getValue().sessionSnapshot(configuredProfile);
+            snapshot.put("selected", configuredProfile.name().equals(selectedProfileName));
+            items.add(snapshot);
+        }
+        return items;
     }
 
     private JsonObject orderDraftJson(TheFixOrderRequest request) {
@@ -273,6 +510,8 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
 
     private OrderPreview buildPreview(JsonObject request) {
         JsonObject effectiveRequest = request == null ? new JsonObject() : request;
+        TheFixClientFixService selectedService = fixServices.get(profileForRequest(effectiveRequest).name());
+        boolean loggedOn = selectedService != null && selectedService.isLoggedOn();
         TheFixMessageType messageType = TheFixMessageType.fromCode(effectiveRequest.getString("messageType"));
         String clOrdId = resolveText(effectiveRequest, "clOrdId", "");
         String origClOrdId = resolveText(effectiveRequest, "origClOrdId", "");
@@ -363,13 +602,13 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         BigDecimal stopPrice = BigDecimal.valueOf(Math.max(rawStopPrice, 0d)).setScale(2, RoundingMode.HALF_UP);
         BigDecimal notional = price.multiply(BigDecimal.valueOf(Math.max(quantity, 0L))).setScale(2, RoundingMode.HALF_UP);
         String status = warnings.isEmpty()
-                ? (fixService.isLoggedOn() ? "READY_FOR_ROUTING" : "READY_PENDING_CONNECTION")
+                ? (loggedOn ? "READY_FOR_ROUTING" : "READY_PENDING_CONNECTION")
                 : "INVALID";
 
         String recommendation;
         if (!warnings.isEmpty()) {
             recommendation = "Resolve the highlighted validation issues before promoting this ticket to a live session.";
-        } else if (fixService.isLoggedOn()) {
+        } else if (loggedOn) {
             recommendation = "Ticket is ready for live routing through the simulator-linked FIX initiator.";
         } else {
             recommendation = "Preview is valid. Prime the session or launch bulk flow to establish live FIX connectivity.";
@@ -678,8 +917,11 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         }
     }
 
-    synchronized JsonObject recentFixMessages(int limit, int offset) {
-        return fixService.recentFixMessagesJson(limit, offset);
+    synchronized JsonObject recentFixMessages(int limit, int offset, String profileName) {
+        TheFixClientFixService service = fixServices.get(profileForName(profileName).name());
+        return service == null
+                ? new JsonObject().put("items", new JsonArray()).put("total", 0).put("limit", Math.max(1, Math.min(limit, 100))).put("offset", Math.max(0, offset))
+                : service.recentFixMessagesJson(limit, offset);
     }
 
     private record MarketDefinition(String region, String code, String label, String venue, String currency, String assetClass, List<String> symbolHints) {

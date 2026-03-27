@@ -15,7 +15,7 @@ ${BOLD}${CYAN}Start Web Stack (Direct JVM)${RESET}
 Usage:
   ./scripts/start_web_stack.sh
 
-Builds the required artifacts, then starts TheFixSimulator and TheFixClient directly on the host JVM.
+Cleans and builds the required artifacts, then starts TheFixSimulator and TheFixClient directly on the host JVM.
 
 EOF
     exit 0
@@ -52,8 +52,8 @@ CLIENT_QUICKFIX_LOG_DIR="${CLIENT_RUNTIME_DIR}/quickfixj"
 mkdir -p "${SIMULATOR_ARTIO_DIR}" "${SIMULATOR_AERON_DIR}" "${SIMULATOR_LOG_DIR}" "${CLIENT_QUICKFIX_LOG_DIR}"
 cd "${PROJECT_ROOT}"
 
-info "Building direct-run artifacts..."
-"${GRADLEW_BIN}" --no-daemon :TheFixSimulator:shadowJar :TheFixClient:installDist -x :TheFixSimulator:test -x :TheFixClient:test
+info "Cleaning and building direct-run artifacts..."
+"${GRADLEW_BIN}" --no-daemon :TheFixSimulator:clean :TheFixClient:clean :TheFixSimulator:shadowJar :TheFixClient:installDist -x :TheFixSimulator:test -x :TheFixClient:test
 
 info "Starting TheFixSimulator..."
 (

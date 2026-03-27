@@ -7,10 +7,13 @@ import com.llexsimulator.fill.FillProfileManager;
 import com.llexsimulator.metrics.MetricsRegistry;
 import io.vertx.core.Vertx;
 import io.vertx.core.VertxOptions;
+import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.HttpServerOptions;
 import io.vertx.ext.web.Router;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.concurrent.TimeUnit;
 
 /**
  * Vert.x HTTP server — serves the Vue.js SPA, REST API, and WebSocket endpoint.
@@ -25,6 +28,7 @@ public final class WebServer {
 
     private final Vertx                vertx;
     private final WebSocketBroadcaster broadcaster;
+    private final HttpServer           httpServer;
 
     public WebServer(SimulatorConfig     config,
                      MetricsRegistry     registry,
@@ -46,20 +50,37 @@ public final class WebServer {
                 .setTcpFastOpen(true)
                 .setReusePort(true);
 
-        vertx.createHttpServer(serverOpts)
-             .requestHandler(router)
-             .webSocketHandler(broadcaster::handleUpgrade)
-             .listen()
-             .onSuccess(srv -> log.info("Web server started on port {}", srv.actualPort()))
-             .onFailure(ex  -> log.error("Web server failed to start", ex));
+        try {
+            this.httpServer = vertx.createHttpServer(serverOpts)
+                    .requestHandler(router)
+                    .webSocketHandler(broadcaster::handleUpgrade)
+                    .listen()
+                    .toCompletionStage()
+                    .toCompletableFuture()
+                    .get(15, TimeUnit.SECONDS);
+            log.info("Web server started on port {}", httpServer.actualPort());
+        } catch (Exception exception) {
+            throw new IllegalStateException("Unable to start simulator web server", exception);
+        }
     }
 
     public Vertx getVertx()                          { return vertx; }
     public WebSocketBroadcaster getBroadcaster()     { return broadcaster; }
 
     public void stop() {
-        vertx.close();
-        log.info("Web server stopped");
+        try {
+            httpServer.close()
+                    .toCompletionStage()
+                    .toCompletableFuture()
+                    .get(15, TimeUnit.SECONDS);
+            vertx.close()
+                    .toCompletionStage()
+                    .toCompletableFuture()
+                    .get(15, TimeUnit.SECONDS);
+            log.info("Web server stopped");
+        } catch (Exception exception) {
+            throw new IllegalStateException("Unable to stop simulator web server", exception);
+        }
     }
 }
 
