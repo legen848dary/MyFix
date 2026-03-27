@@ -121,6 +121,25 @@ class TheFixClientLiveIntegrationTest {
 
     @Test
     @Timeout(30)
+    void disconnectCapturesAdminLogoutMessages() throws Exception {
+        state = createLiveState();
+
+        state.connect();
+        assertTrue(waitFor(() -> state.snapshot().getJsonObject("session").getBoolean("connected"), Duration.ofSeconds(10)),
+                "Expected TheFixClient to log on to the simulator acceptor");
+
+        state.disconnect();
+        assertTrue(waitFor(() -> !state.snapshot().getJsonObject("session").getBoolean("connected"), Duration.ofSeconds(10)),
+                "Expected TheFixClient to disconnect from the simulator acceptor");
+
+        assertTrue(waitFor(() -> {
+            String payload = state.recentFixMessages(50, 0, TheFixSessionProfile.DEFAULT_PROFILE_NAME).encode();
+            return payload.contains("\"msgType\":\"5\"");
+        }, Duration.ofSeconds(5)), "Expected recent FIX messages to include Logout (35=5) after disconnect");
+    }
+
+    @Test
+    @Timeout(30)
     void duplicateSessionIdentityProfileCannotBreakBulkFlowOnConnectedOriginalProfile() throws Exception {
         state = createLiveState();
 
@@ -315,4 +334,3 @@ class TheFixClientLiveIntegrationTest {
         boolean evaluate() throws Exception;
     }
 }
-

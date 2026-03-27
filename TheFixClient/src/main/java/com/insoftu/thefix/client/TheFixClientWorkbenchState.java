@@ -145,9 +145,6 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         TheFixClientFixService service = fixServices.get(selectedProfile.name());
         if (service != null) {
             service.disconnect();
-            if (service.isIdle()) {
-                fixServices.remove(selectedProfile.name());
-            }
         }
         return snapshot(selectedProfile.name());
     }

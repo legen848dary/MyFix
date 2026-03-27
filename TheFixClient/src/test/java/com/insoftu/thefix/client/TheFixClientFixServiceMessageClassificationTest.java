@@ -17,6 +17,7 @@ import quickfix.field.Text;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TheFixClientFixServiceMessageClassificationTest {
 
@@ -44,6 +45,21 @@ class TheFixClientFixServiceMessageClassificationTest {
             assertEquals(1L, service.kpiSnapshot().getLong("executionReports"));
             assertEquals(0L, service.kpiSnapshot().getLong("cancels"));
             assertEquals(0L, service.kpiSnapshot().getLong("rejects"));
+        }
+    }
+
+    @Test
+    void marksAdminTrafficInRecentFixMessages() throws Exception {
+        try (TheFixClientFixService service = new TheFixClientFixService(testConfig(), new TheFixSessionProfileStore(testConfig()))) {
+            SessionID sessionId = new SessionID("FIX.4.4", "CLIENT", "SIM");
+
+            service.toAdmin(logoutMessage(), sessionId);
+            service.fromAdmin(logoutMessage(), sessionId);
+
+            String payload = service.recentFixMessagesJson(10, 0).encode();
+            assertTrue(payload.contains("\"flow\":\"ADMIN\""));
+            assertTrue(payload.contains("\"admin\":true"));
+            assertTrue(payload.contains("\"msgType\":\"5\""));
         }
     }
 
@@ -76,6 +92,13 @@ class TheFixClientFixServiceMessageClassificationTest {
         message.setString(ExecType.FIELD, Character.toString(execType));
         message.setString(OrdStatus.FIELD, Character.toString(ordStatus));
         message.setString(Text.FIELD, text);
+        return message;
+    }
+
+    private static Message logoutMessage() {
+        Message message = new Message();
+        message.getHeader().setString(MsgType.FIELD, MsgType.LOGOUT);
+        message.setString(Text.FIELD, "Normal logout");
         return message;
     }
 }

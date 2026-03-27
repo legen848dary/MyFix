@@ -283,7 +283,7 @@ createApp({
         <div class="brand">
           <div class="brand__mark">TF</div>
           <div>
-            <p class="brand__eyebrow">Order workstation</p>
+            <p class="brand__eyebrow">Order workstation · <span class="brand__profile-name">{{ activeSessionProfileLabel }}</span></p>
             <h1 class="brand__title">{{ overview.applicationName || 'TheFixClient' }}</h1>
             <p class="brand__subtitle">Command the full FIX journey from one deck — compose, launch, and track every order in motion.</p>
           </div>
@@ -831,6 +831,14 @@ createApp({
                   </select>
                 </label>
                 <label class="fix-messages-toolbar__label">
+                  <span>Flow</span>
+                  <select v-model="fixMsgFlowFilter" class="fix-messages-toolbar__select">
+                    <option value="">All</option>
+                    <option value="APPLICATION">Application</option>
+                    <option value="ADMIN">Admin</option>
+                  </select>
+                </label>
+                <label class="fix-messages-toolbar__label">
                   <input type="checkbox" v-model="fixMsgHideHeartbeats" style="margin-right:4px" />
                   <span>Hide heartbeats</span>
                 </label>
@@ -842,6 +850,7 @@ createApp({
                   <tr>
                     <th class="text-left">Timestamp</th>
                     <th class="text-left">Direction</th>
+                    <th class="text-left">Flow</th>
                     <th class="text-left">Message Type</th>
                     <th class="text-left">Preview</th>
                   </tr>
@@ -858,11 +867,17 @@ createApp({
                         {{ msg.direction }}
                       </span>
                     </td>
+                    <td class="fix-msg-cell">
+                      <span class="fix-msg-flow"
+                            :class="msg.flow === 'ADMIN' ? 'fix-msg-flow--admin' : 'fix-msg-flow--application'">
+                        {{ msg.flow || 'APPLICATION' }}
+                      </span>
+                    </td>
                     <td class="mono fix-msg-cell">{{ msg.msgTypeLabel }} <span class="text-faint">({{ msg.msgType }})</span></td>
                     <td class="mono fix-msg-preview">{{ msg.preview }}</td>
                   </tr>
                   <tr v-if="!filteredFixMessages.length">
-                    <td colspan="4" class="orders-table__empty">No FIX messages captured yet. Connect a session to start capturing.</td>
+                    <td colspan="5" class="orders-table__empty">No FIX messages match the current filters.</td>
                   </tr>
                 </tbody>
               </table>
@@ -1387,6 +1402,7 @@ createApp({
     const fixMsgOffset = ref(0)
     const fixMsgSearch = ref('')
     const fixMsgDirectionFilter = ref('')
+    const fixMsgFlowFilter = ref('')
     const fixMsgHideHeartbeats = ref(false)
     const fixMsgDetailOpen = ref(false)
     const fixMsgDetail = ref(null)
@@ -1612,6 +1628,9 @@ createApp({
       if (fixMsgDirectionFilter.value) {
         items = items.filter(m => m.direction === fixMsgDirectionFilter.value)
       }
+      if (fixMsgFlowFilter.value) {
+        items = items.filter(m => (m.flow || 'APPLICATION') === fixMsgFlowFilter.value)
+      }
       if (fixMsgHideHeartbeats.value) {
         items = items.filter(m => m.msgType !== '0')
       }
@@ -1621,6 +1640,7 @@ createApp({
           (m.msgTypeLabel || '').toLowerCase().includes(query) ||
           (m.msgType || '').toLowerCase().includes(query) ||
           (m.direction || '').toLowerCase().includes(query) ||
+          (m.flow || '').toLowerCase().includes(query) ||
           (m.preview || '').toLowerCase().includes(query) ||
           (m.timestamp || '').toLowerCase().includes(query)
         )
@@ -2540,6 +2560,14 @@ createApp({
         method: 'POST',
         body: JSON.stringify(withSelectedProfile())
       }), true)
+      if (activePage.value === 'fix-messages') {
+        await loadFixMessages()
+        window.setTimeout(() => {
+          if (activePage.value === 'fix-messages') {
+            loadFixMessages().catch(() => {})
+          }
+        }, 750)
+      }
     }))
     const pulseTest = async () => runAction('pulse', async () => applyOverview(await apiCall('/api/session/pulse-test', {
       method: 'POST',
@@ -3010,6 +3038,7 @@ createApp({
       fixMsgOffset,
       fixMsgSearch,
       fixMsgDirectionFilter,
+      fixMsgFlowFilter,
       fixMsgHideHeartbeats,
       fixMsgDetailOpen,
       fixMsgDetail,
@@ -3108,4 +3137,3 @@ createApp({
     }
   }
 }).mount('#app')
-

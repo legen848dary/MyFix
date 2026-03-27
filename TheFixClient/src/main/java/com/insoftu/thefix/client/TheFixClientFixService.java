@@ -52,6 +52,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -107,7 +108,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     private final LinkedHashMap<String, OrderView> recentOrders = new LinkedHashMap<>();
     private final Map<String, String> clOrdIdAliases = new HashMap<>();
     private final Set<String> hiddenClOrdIds = new HashSet<>();
-    private final Deque<FixMessageRecord> recentFixMessages = new ArrayDeque<>();
+    private final ConcurrentLinkedDeque<FixMessageRecord> recentFixMessages = new ConcurrentLinkedDeque<>();
     private final AtomicLong fixMessageSequence = new AtomicLong();
 
     private SocketInitiator initiator;
@@ -167,28 +168,37 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         }
     }
 
-    synchronized void disconnect() {
-        stopAutoFlowInternal(autoFlowActive);
-        connectionRequested = false;
-        loggedOn = false;
-        connectedAt = null;
-        connectedProfile = null;
-        activeSessionId.set(null);
-        sessionStatus = "Standby";
+    void disconnect() {
+        final SocketInitiator initiatorToStop;
+        synchronized (this) {
+            stopAutoFlowInternal(autoFlowActive);
+            connectionRequested = false;
+            loggedOn = false;
+            connectedAt = null;
+            connectedProfile = null;
+            activeSessionId.set(null);
+            sessionStatus = "Standby";
 
-        if (initiator == null) {
-            addEvent("INFO", "Session already idle", "Disconnect requested while no FIX initiator was running.");
-            return;
+            if (initiator == null) {
+                addEvent("INFO", "Session already idle", "Disconnect requested while no FIX initiator was running.");
+                return;
+            }
+
+            // Capture and clear initiator reference before releasing the lock so that
+            // QuickFIX/J callbacks (toAdmin, fromAdmin, onLogout) fired during stop()
+            // can acquire the lock and capture the Logout messages without deadlocking.
+            initiatorToStop = this.initiator;
+            this.initiator = null;
         }
 
         try {
-            initiator.stop(true);
+            initiatorToStop.stop(false);
         } catch (Exception exception) {
             log.warn("Error while stopping FIX initiator", exception);
-        } finally {
-            initiator = null;
         }
-        addEvent("INFO", "Session disconnected", "The FIX workstation returned to standby mode.");
+        synchronized (this) {
+            addEvent("INFO", "Session disconnected", "The FIX workstation returned to standby mode.");
+        }
     }
 
     synchronized void pulseTest() {
@@ -389,24 +399,24 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     @Override
     public void toAdmin(Message message, SessionID sessionId) {
         log.debug("toAdmin session={} type={} raw={}", sessionId, safeMessageType(message), printable(message));
-        captureFixMessage("SENT", message);
+        captureFixMessage("SENT", "ADMIN", message);
     }
 
     @Override
     public void fromAdmin(Message message, SessionID sessionId) {
         log.debug("fromAdmin session={} type={} raw={}", sessionId, safeMessageType(message), printable(message));
-        captureFixMessage("RECEIVED", message);
+        captureFixMessage("RECEIVED", "ADMIN", message);
     }
 
     @Override
     public void toApp(Message message, SessionID sessionId) {
         log.debug("toApp session={} type={} raw={}", sessionId, safeMessageType(message), printable(message));
-        captureFixMessage("SENT", message);
+        captureFixMessage("SENT", "APPLICATION", message);
     }
 
     @Override
     public synchronized void fromApp(Message message, SessionID sessionId) throws FieldNotFound {
-        captureFixMessage("RECEIVED", message);
+        captureFixMessage("RECEIVED", "APPLICATION", message);
         String messageType = message.getHeader().getString(MsgType.FIELD);
         switch (messageType) {
             case MsgType.EXECUTION_REPORT -> handleExecutionReport(message);
@@ -416,7 +426,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     }
 
     @Override
-    public synchronized void close() {
+    public void close() {
         disconnect();
         autoFlowExecutor.shutdownNow();
         try {
@@ -876,13 +886,15 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         }
     }
 
-    private record FixMessageRecord(long id, Instant timestamp, String direction, String msgType,
-                                     String msgTypeLabel, String preview, String rawMessage) {
+    private record FixMessageRecord(long id, Instant timestamp, String direction, String flow,
+                                     String msgType, String msgTypeLabel, String preview, String rawMessage) {
         JsonObject toJson() {
             return new JsonObject()
                     .put("id", id)
                     .put("timestamp", timestamp.toString())
                     .put("direction", direction)
+                    .put("flow", flow)
+                    .put("admin", "ADMIN".equals(flow))
                     .put("msgType", msgType)
                     .put("msgTypeLabel", msgTypeLabel)
                     .put("preview", preview)
@@ -890,13 +902,13 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         }
     }
 
-    private synchronized void captureFixMessage(String direction, Message message) {
+    private void captureFixMessage(String direction, String flow, Message message) {
         String msgType = safeMessageType(message);
         String label = MSG_TYPE_LABELS.getOrDefault(msgType, msgType);
         String raw = printable(message);
         String preview = raw.length() > PREVIEW_MAX_LENGTH ? raw.substring(0, PREVIEW_MAX_LENGTH) + "…" : raw;
         recentFixMessages.addFirst(new FixMessageRecord(
-                fixMessageSequence.incrementAndGet(), Instant.now(), direction, msgType, label, preview, raw));
+                fixMessageSequence.incrementAndGet(), Instant.now(), direction, flow, msgType, label, preview, raw));
         while (recentFixMessages.size() > MAX_FIX_MESSAGES) {
             recentFixMessages.removeLast();
         }
@@ -1179,4 +1191,3 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         }
     }
 }
-
