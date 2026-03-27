@@ -1,5 +1,6 @@
 package com.llexsimulator.engine;
 
+import com.llexsimulator.config.SimulatorConfig;
 import com.llexsimulator.disruptor.DisruptorPipeline;
 import io.aeron.logbuffer.ControlledFragmentHandler.Action;
 import org.agrona.concurrent.UnsafeBuffer;
@@ -103,6 +104,72 @@ class EngineCoverageTest {
         assertEquals(0L, connection.lastOutboundAtEpochMs());
         assertEquals("1", connection.lastInboundMsgType());
         assertTrue(connection.recentEventsSnapshot().stream().anyMatch(s -> s.contains("SESSION_STARTED")));
+    }
+
+    @Test
+    void fixEngineManagerUsesLowLatencyPollingOutsideBenchmarkModeWhenBusySpinIsConfigured() {
+        SimulatorConfig config = new SimulatorConfig(
+                "0.0.0.0",
+                9880,
+                "logs/quickfixj",
+                false,
+                8080,
+                "/tmp/aeron",
+                "aeron:ipc",
+                "aeron:ipc",
+                131072,
+                "BUSY_SPIN",
+                "BUSY_SPIN",
+                "BUSY_SPIN",
+                "BUSY_SPIN",
+                "DEDICATED",
+                "busy_spin",
+                "noop",
+                "noop",
+                "backoff",
+                "backoff",
+                131072,
+                500,
+                false,
+                true
+        );
+
+        assertTrue(FixEngineManager.usesLowLatencyPolling(config));
+        assertEquals(32, FixEngineManager.resolvePollFragmentLimit(config));
+        assertEquals(1, FixEngineManager.resolveMaxPollBatchesPerCycle(config));
+    }
+
+    @Test
+    void fixEngineManagerUsesAdaptivePollingWhenGuiRunsWithSleepingStrategy() {
+        SimulatorConfig config = new SimulatorConfig(
+                "0.0.0.0",
+                9880,
+                "logs/quickfixj",
+                false,
+                8080,
+                "/tmp/aeron",
+                "aeron:ipc",
+                "aeron:ipc",
+                131072,
+                "SLEEPING",
+                "SLEEPING",
+                "SLEEPING",
+                "SLEEPING",
+                "DEDICATED",
+                "busy_spin",
+                "noop",
+                "noop",
+                "backoff",
+                "backoff",
+                131072,
+                500,
+                false,
+                true
+        );
+
+        assertFalse(FixEngineManager.usesLowLatencyPolling(config));
+        assertEquals(256, FixEngineManager.resolvePollFragmentLimit(config));
+        assertEquals(8, FixEngineManager.resolveMaxPollBatchesPerCycle(config));
     }
 
     @Test
@@ -215,4 +282,3 @@ class EngineCoverageTest {
         return session;
     }
 }
-

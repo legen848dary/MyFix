@@ -23,6 +23,15 @@ class AeronRuntimeTuningTest {
                 "aeron:ipc",
                 131072,
                 "BUSY_SPIN",
+                "BUSY_SPIN",
+                "BUSY_SPIN",
+                "BUSY_SPIN",
+                "DEDICATED",
+                "busy_spin",
+                "noop",
+                "noop",
+                "backoff",
+                "backoff",
                 131072,
                 500,
                 false,
@@ -48,6 +57,15 @@ class AeronRuntimeTuningTest {
                 "aeron:ipc?term-length=131072",
                 131072,
                 "BUSY_SPIN",
+                "BUSY_SPIN",
+                "BUSY_SPIN",
+                "BUSY_SPIN",
+                "DEDICATED",
+                "busy_spin",
+                "noop",
+                "noop",
+                "backoff",
+                "backoff",
                 131072,
                 500,
                 false,
@@ -79,4 +97,3 @@ class AeronRuntimeTuningTest {
         assertEquals(expected, resolved);
     }
 }
-

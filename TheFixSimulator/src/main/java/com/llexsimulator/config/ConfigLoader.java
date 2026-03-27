@@ -46,6 +46,12 @@ public final class ConfigLoader {
             }
         }
 
+        String globalWaitStrategy = property(props, "wait.strategy", "BUSY_SPIN");
+        String aeronThreadingMode = property(props, "aeron.threading.mode", "DEDICATED");
+        String defaultAeronConductorIdleStrategy =
+                "DEDICATED".equalsIgnoreCase(aeronThreadingMode) ? "busy_spin" : "backoff";
+        String aeronSharedIdleStrategy = property(props, "aeron.shared.idle.strategy", "backoff");
+
         return new SimulatorConfig(
                 property(props, "fix.host", "0.0.0.0"),
                 Integer.parseInt(property(props, "fix.port", "9880")),
@@ -56,7 +62,16 @@ public final class ConfigLoader {
                 property(props, "artio.library.aeron.channel", AeronRuntimeTuning.DEFAULT_ARTIO_LIBRARY_CHANNEL),
                 property(props, "metrics.aeron.channel", AeronRuntimeTuning.DEFAULT_METRICS_CHANNEL),
                 Integer.parseInt(property(props, "ring.buffer.size", "131072")),
-                property(props, "wait.strategy", "BUSY_SPIN"),
+                globalWaitStrategy,
+                property(props, "wait.strategy.disruptor", globalWaitStrategy),
+                property(props, "wait.strategy.fix.poller", globalWaitStrategy),
+                property(props, "wait.strategy.metrics.subscriber", globalWaitStrategy),
+                aeronThreadingMode,
+                property(props, "aeron.conductor.idle.strategy", defaultAeronConductorIdleStrategy),
+                property(props, "aeron.sender.idle.strategy", "noop"),
+                property(props, "aeron.receiver.idle.strategy", "noop"),
+                aeronSharedIdleStrategy,
+                property(props, "aeron.shared.network.idle.strategy", aeronSharedIdleStrategy),
                 Integer.parseInt(property(props, "order.pool.size", "131072")),
                 Integer.parseInt(property(props, "metrics.publish.interval", "500")),
                 Boolean.parseBoolean(property(props, "benchmark.mode.enabled", "false")),
@@ -77,4 +92,3 @@ public final class ConfigLoader {
         return System.getProperty(key, props.getProperty(key, defaultValue));
     }
 }
-

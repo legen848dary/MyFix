@@ -135,7 +135,7 @@ class MetricsSubscriberTest {
         }
 
         private MetricsSubscriber newSubscriber(MetricsRegistry registry) {
-            return new MetricsSubscriber(ctx, broadcaster, vertx, registry, "aeron:ipc");
+            return new MetricsSubscriber(ctx, broadcaster, vertx, registry, "aeron:ipc", "BUSY_SPIN");
         }
     }
 }

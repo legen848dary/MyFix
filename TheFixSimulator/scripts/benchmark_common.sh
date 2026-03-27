@@ -50,7 +50,8 @@ ${BOLD}Defaults:${RESET}
 
 ${BOLD}What it does:${RESET}
   1. Temporarily enables ${BOLD}benchmark.mode.enabled=true${RESET} in ${BENCHMARK_CONFIG_FILE}
-  2. Temporarily sets ${BOLD}wait.strategy=${BENCHMARK_WAIT_STRATEGY}${RESET} for low-latency measurement
+  2. Temporarily sets ${BOLD}wait.strategy=${BENCHMARK_WAIT_STRATEGY}${RESET} for compatibility
+     while benchmark mode itself forces the aggressive benchmark threading profile
   3. Starts/restarts the simulator only if needed
   4. Resets /api/statistics
   5. Runs the Docker demo FIX client at the requested rate
@@ -399,7 +400,7 @@ prepare_benchmark_mode() {
     current_mode="$(current_benchmark_mode_value)"
     current_wait_strategy="$(current_wait_strategy_value)"
     if [[ "${current_mode}" == "true" && "${current_wait_strategy^^}" == "${BENCHMARK_WAIT_STRATEGY^^}" ]]; then
-        info "Benchmark config already active in ${BENCHMARK_CONFIG_FILE} (benchmark.mode.enabled=true, wait.strategy=${current_wait_strategy})"
+        info "Benchmark config already active in ${BENCHMARK_CONFIG_FILE} (benchmark.mode.enabled=true, wait.strategy=${current_wait_strategy}, benchmark threading profile active at runtime)"
         return 0
     fi
 
@@ -408,7 +409,7 @@ prepare_benchmark_mode() {
     set_benchmark_mode_value true
     set_wait_strategy_value "${BENCHMARK_WAIT_STRATEGY}"
     BENCHMARK_CONFIG_CHANGED=true
-    info "Temporarily enabled benchmark.mode.enabled=true and wait.strategy=${BENCHMARK_WAIT_STRATEGY} in ${BENCHMARK_CONFIG_FILE}"
+    info "Temporarily enabled benchmark.mode.enabled=true and wait.strategy=${BENCHMARK_WAIT_STRATEGY} in ${BENCHMARK_CONFIG_FILE}; runtime benchmark profile will force aggressive per-thread strategies"
 }
 
 restore_benchmark_mode_if_needed() {
@@ -511,4 +512,3 @@ run_benchmark_flow() {
     BENCHMARK_DEMO_CLIENT_STARTED=false
     success "Benchmark run completed."
 }
-

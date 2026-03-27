@@ -56,7 +56,11 @@ public final class SimulatorBootstrap {
 
         // 1 — Config
         config = AeronRuntimeTuning.resolve(ConfigLoader.load());
+        if (config.benchmarkModeEnabled()) {
+            config = config.withBenchmarkThreadingProfile();
+        }
         System.setProperty("aeron.dir", config.aeronDir());
+        applyAeronSystemProperties(config);
         log.info("Config: fixPort={} webPort={} ringBufferSize={} aeronDir={} artioLibraryChannel={} metricsChannel={}",
                 config.fixPort(), config.webPort(), config.ringBufferSize(),
                 config.aeronDir(), config.artioLibraryAeronChannel(), config.metricsAeronChannel());
@@ -102,7 +106,7 @@ public final class SimulatorBootstrap {
             // 8 — Metrics subscriber (Aeron IPC → WebSocket broadcast)
             metricsSubscriber = new MetricsSubscriber(
                     aeronContext, webServer.getBroadcaster(), webServer.getVertx(),
-                    metricsRegistry, config.metricsAeronChannel());
+                    metricsRegistry, config.metricsAeronChannel(), config.metricsSubscriberWaitStrategy());
             metricsSubscriberThread = Thread.ofVirtual().name("metrics-subscriber").unstarted(metricsSubscriber);
             metricsSubscriberThread.start();
         } else {
@@ -195,5 +199,13 @@ public final class SimulatorBootstrap {
         }
         log.info("=== LLExSimulator stopped ===");
     }
-}
 
+    private static void applyAeronSystemProperties(SimulatorConfig config) {
+        System.setProperty("aeron.threading.mode", config.aeronThreadingMode());
+        System.setProperty("aeron.conductor.idle.strategy", config.aeronConductorIdleStrategy());
+        System.setProperty("aeron.sender.idle.strategy", config.aeronSenderIdleStrategy());
+        System.setProperty("aeron.receiver.idle.strategy", config.aeronReceiverIdleStrategy());
+        System.setProperty("aeron.shared.idle.strategy", config.aeronSharedIdleStrategy());
+        System.setProperty("aeron.shared.network.idle.strategy", config.aeronSharedNetworkIdleStrategy());
+    }
+}

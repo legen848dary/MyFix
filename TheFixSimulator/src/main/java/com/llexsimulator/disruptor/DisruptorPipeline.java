@@ -1,11 +1,10 @@
 package com.llexsimulator.disruptor;
 
 import com.llexsimulator.config.SimulatorConfig;
+import com.llexsimulator.config.ThreadWaitStrategySupport;
 import com.llexsimulator.disruptor.handler.CompositeOrderEventHandler;
 import com.llexsimulator.engine.FixConnection;
-import com.lmax.disruptor.BusySpinWaitStrategy;
 import com.lmax.disruptor.RingBuffer;
-import com.lmax.disruptor.SleepingWaitStrategy;
 import com.lmax.disruptor.WaitStrategy;
 import com.lmax.disruptor.dsl.Disruptor;
 import com.lmax.disruptor.dsl.ProducerType;
@@ -36,9 +35,9 @@ public final class DisruptorPipeline {
             SimulatorConfig config,
             CompositeOrderEventHandler compositeOrderEventHandler
     ) {
-        WaitStrategy waitStrategy = "BUSY_SPIN".equalsIgnoreCase(config.waitStrategy())
-                ? new BusySpinWaitStrategy()
-                : new SleepingWaitStrategy(0, 100_000L);
+        WaitStrategy waitStrategy = ThreadWaitStrategySupport.resolveDisruptorWaitStrategy(
+                config.disruptorWaitStrategy(),
+                "disruptor");
 
         AtomicInteger threadCounter = new AtomicInteger(0);
         ThreadFactory tf = runnable -> {
@@ -63,7 +62,7 @@ public final class DisruptorPipeline {
 
         this.ringBuffer = disruptor.getRingBuffer();
         log.info("Disruptor pipeline configured: ringBufferSize={} waitStrategy={}",
-                config.ringBufferSize(), config.waitStrategy());
+                config.ringBufferSize(), config.disruptorWaitStrategy());
     }
 
     public void start() {
@@ -89,4 +88,3 @@ public final class DisruptorPipeline {
 
     public long getRemainingCapacity() { return ringBuffer.remainingCapacity(); }
 }
-

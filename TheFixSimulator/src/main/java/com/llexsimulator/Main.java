@@ -14,8 +14,8 @@ import org.slf4j.LoggerFactory;
  *   -XX:+AlwaysPreTouch               ← pre-fault heap pages at startup
  *   -XX:+DisableExplicitGC            ← prevent library System.gc() calls
  *   -XX:+PerfDisableSharedMem         ← disable JMX perf shared memory
- *   -Daeron.threading.mode=DEDICATED  ← dedicated sender/receiver threads
- *   -Daeron.sender.idle.strategy=noop ← busy-poll sender (lowest latency)
+ *   -Daeron.threading.mode=DEDICATED  ← optional override; config file can set it too
+ *   -Daeron.sender.idle.strategy=noop ← optional override; config file can set it too
  *   -Daeron.receiver.idle.strategy=noop
  *   -Dagrona.disable.bounds.checks=true ← skip UnsafeBuffer bounds checks
  *   --add-opens java.base/sun.nio.ch=ALL-UNNAMED
@@ -29,9 +29,6 @@ public final class Main {
 
     public static void main(String[] args) {
         // Apply system properties required by Aeron/Agrona BEFORE any class loading
-        setSystemPropertyIfAbsent("aeron.threading.mode",      "DEDICATED");
-        setSystemPropertyIfAbsent("aeron.sender.idle.strategy",   "noop");
-        setSystemPropertyIfAbsent("aeron.receiver.idle.strategy",  "noop");
         setSystemPropertyIfAbsent("aeron.ipc.term.buffer.length",
                 Integer.toString(AeronRuntimeTuning.DEFAULT_ARTIO_IPC_TERM_LENGTH_BYTES));
         setSystemPropertyIfAbsent("agrona.disable.bounds.checks",  "true");
@@ -56,4 +53,3 @@ public final class Main {
         }
     }
 }
-

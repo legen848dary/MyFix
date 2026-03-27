@@ -1,5 +1,6 @@
 package com.llexsimulator.aeron;
 
+import com.llexsimulator.config.ThreadWaitStrategySupport;
 import com.llexsimulator.metrics.MetricsRegistry;
 import com.llexsimulator.sbe.MessageHeaderDecoder;
 import com.llexsimulator.sbe.MetricsSnapshotDecoder;
@@ -9,6 +10,8 @@ import io.aeron.logbuffer.FragmentHandler;
 import io.aeron.logbuffer.Header;
 import io.vertx.core.Vertx;
 import org.agrona.DirectBuffer;
+import org.agrona.concurrent.BusySpinIdleStrategy;
+import org.agrona.concurrent.IdleStrategy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,6 +29,7 @@ public final class MetricsSubscriber implements Runnable {
     private final WebSocketBroadcaster   broadcaster;
     private final Vertx                  vertx;
     private final MetricsRegistry        metricsRegistry;
+    private final IdleStrategy           idleStrategy;
     private final MessageHeaderDecoder   headerDecoder  = new MessageHeaderDecoder();
     private final MetricsSnapshotDecoder snapshotDecoder = new MetricsSnapshotDecoder();
     private final StringBuilder          jsonBuf        = new StringBuilder(512);
@@ -33,11 +37,13 @@ public final class MetricsSubscriber implements Runnable {
     private volatile boolean running = true;
 
     public MetricsSubscriber(AeronContext ctx, WebSocketBroadcaster broadcaster, Vertx vertx,
-                              MetricsRegistry metricsRegistry, String channel) {
+                              MetricsRegistry metricsRegistry, String channel, String waitStrategy) {
         this.subscription    = ctx.getAeron().addSubscription(channel, STREAM_ID);
         this.broadcaster     = broadcaster;
         this.vertx           = vertx;
         this.metricsRegistry = metricsRegistry;
+        this.idleStrategy    = ThreadWaitStrategySupport.resolveLoopIdleStrategy(
+                waitStrategy, new BusySpinIdleStrategy());
         log.info("MetricsSubscriber ready on {} stream {}", channel, STREAM_ID);
     }
 
@@ -46,9 +52,7 @@ public final class MetricsSubscriber implements Runnable {
         FragmentHandler handler = this::onFragment;
         while (running && !Thread.currentThread().isInterrupted()) {
             int fragments = subscription.poll(handler, 10);
-            if (fragments == 0) {
-                Thread.onSpinWait();
-            }
+            idleStrategy.idle(fragments);
         }
     }
 

@@ -1,7 +1,10 @@
 package com.llexsimulator.engine;
 
 import com.llexsimulator.config.SimulatorConfig;
+import com.llexsimulator.config.ThreadWaitStrategySupport;
 import com.llexsimulator.fix.ArtioDictionaryResolver;
+import org.agrona.concurrent.BackoffIdleStrategy;
+import org.agrona.concurrent.IdleStrategy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.agrona.concurrent.SleepingIdleStrategy;
@@ -15,7 +18,6 @@ import uk.co.real_logic.artio.validation.SessionPersistenceStrategy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -38,9 +40,10 @@ public final class FixEngineManager {
     private final FixSessionApplication app;
     private final SimulatorConfig config;
     private final FixOutboundSender outboundSender;
-    private final boolean benchmarkModeEnabled;
+    private final boolean lowLatencyPollingEnabled;
     private final int pollFragmentLimit;
     private final int maxPollBatchesPerCycle;
+    private final IdleStrategy pollerIdleStrategy;
 
     private FixEngine engine;
     private FixLibrary library;
@@ -52,10 +55,10 @@ public final class FixEngineManager {
         this.app = app;
         this.config = config;
         this.outboundSender = outboundSender;
-        this.benchmarkModeEnabled = config.benchmarkModeEnabled();
-        this.pollFragmentLimit = config.benchmarkModeEnabled() ? BENCHMARK_POLL_FRAGMENT_LIMIT : POLL_FRAGMENT_LIMIT;
-        this.maxPollBatchesPerCycle = config.benchmarkModeEnabled()
-                ? BENCHMARK_MAX_POLL_BATCHES_PER_CYCLE : MAX_POLL_BATCHES_PER_CYCLE;
+        this.lowLatencyPollingEnabled = usesLowLatencyPolling(config);
+        this.pollFragmentLimit = resolvePollFragmentLimit(config);
+        this.maxPollBatchesPerCycle = resolveMaxPollBatchesPerCycle(config);
+        this.pollerIdleStrategy = resolvePollerIdleStrategy(config);
     }
 
     public void start() throws Exception {
@@ -154,7 +157,6 @@ public final class FixEngineManager {
     }
 
     private void pollLibrary() {
-        int consecutiveEmptyPolls = 0;
         while (running.get()) {
             int totalWorkCount = 0;
             totalWorkCount += outboundSender.drain();
@@ -169,29 +171,37 @@ public final class FixEngineManager {
             }
 
 
-            if (totalWorkCount > 0) {
-                consecutiveEmptyPolls = 0;
-                continue;
-            }
-
-            if (benchmarkModeEnabled) {
-                Thread.onSpinWait();
-                continue;
-            }
-
-            consecutiveEmptyPolls++;
-            if (consecutiveEmptyPolls <= EMPTY_POLLS_BEFORE_YIELD) {
-                Thread.onSpinWait();
-            } else if (consecutiveEmptyPolls <= EMPTY_POLLS_BEFORE_PARK) {
-                Thread.yield();
-            } else {
-                LockSupport.parkNanos(PARK_NANOS);
-                if (Thread.currentThread().isInterrupted()) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
+            pollerIdleStrategy.idle(totalWorkCount);
+            if (Thread.currentThread().isInterrupted()) {
+                Thread.currentThread().interrupt();
+                return;
             }
         }
     }
-}
 
+    static boolean usesLowLatencyPolling(SimulatorConfig config) {
+        return config.benchmarkModeEnabled() || ThreadWaitStrategySupport.isBusySpin(config.fixPollerWaitStrategy());
+    }
+
+    static int resolvePollFragmentLimit(SimulatorConfig config) {
+        return usesLowLatencyPolling(config) ? BENCHMARK_POLL_FRAGMENT_LIMIT : POLL_FRAGMENT_LIMIT;
+    }
+
+    static int resolveMaxPollBatchesPerCycle(SimulatorConfig config) {
+        return usesLowLatencyPolling(config)
+                ? BENCHMARK_MAX_POLL_BATCHES_PER_CYCLE
+                : MAX_POLL_BATCHES_PER_CYCLE;
+    }
+
+    private static IdleStrategy resolvePollerIdleStrategy(SimulatorConfig config) {
+        if (config.benchmarkModeEnabled()) {
+            return ThreadWaitStrategySupport.resolveLoopIdleStrategy(
+                    config.fixPollerWaitStrategy(),
+                    new org.agrona.concurrent.BusySpinIdleStrategy());
+        }
+
+        return ThreadWaitStrategySupport.resolveLoopIdleStrategy(
+                config.fixPollerWaitStrategy(),
+                new BackoffIdleStrategy(EMPTY_POLLS_BEFORE_YIELD, EMPTY_POLLS_BEFORE_PARK, 1L, PARK_NANOS));
+    }
+}

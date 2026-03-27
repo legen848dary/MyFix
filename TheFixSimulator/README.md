@@ -744,7 +744,10 @@ fix.raw.message.logging.enabled=false # enable only for debugging raw FIX I/O
 
 # Disruptor
 ring.buffer.size=131072          # Must be power of 2
-wait.strategy=BUSY_SPIN          # BUSY_SPIN (lowest latency) or SLEEPING (lower CPU)
+wait.strategy=BUSY_SPIN          # Legacy fallback for thread-specific overrides below
+wait.strategy.disruptor=BUSY_SPIN        # MUST for ultra-low-latency hot path
+wait.strategy.fix.poller=BUSY_SPIN       # MUST for ultra-low-latency hot path
+wait.strategy.metrics.subscriber=SLEEPING  # usually leave softer; not on matching path
 
 # Order Repository (pre-allocated pool)
 order.pool.size=131072
@@ -775,11 +778,13 @@ Mount a custom config without rebuilding:
 
 The `docker-compose.yml` mounts `./config/` as a read-only volume inside the container.
 
-For lower-noise latency runs, set `benchmark.mode.enabled=true` and a low-latency `wait.strategy` such as `BUSY_SPIN` in `./config/simulator.properties`, then restart the simulator. This keeps the REST/health endpoints available but disables the live Aeron/WebSocket metrics fan-out used by the GUI.
+For lower-noise latency runs, set `benchmark.mode.enabled=true`. Benchmark mode now forces the aggressive benchmark threading profile automatically: `wait.strategy.disruptor=BUSY_SPIN`, `wait.strategy.fix.poller=BUSY_SPIN`, `wait.strategy.metrics.subscriber=BUSY_SPIN`, `aeron.threading.mode=DEDICATED`, `aeron.conductor.idle.strategy=busy_spin`, and `aeron.sender.idle.strategy=noop` / `aeron.receiver.idle.strategy=noop`. The live Aeron/WebSocket metrics subscriber is still disabled in benchmark mode, so you get the aggressive runtime profile without paying for the GUI metrics bridge.
+
+If you want the GUI to stay closer to benchmark-mode latency, keep `benchmark.mode.enabled=false` but switch the hot-path threads to `BUSY_SPIN` explicitly: `wait.strategy.disruptor=BUSY_SPIN` and `wait.strategy.fix.poller=BUSY_SPIN`. For the transport side, keep `aeron.threading.mode=DEDICATED`, `aeron.conductor.idle.strategy=busy_spin`, and `aeron.sender.idle.strategy=noop` / `aeron.receiver.idle.strategy=noop`. GUI mode can then run materially closer to benchmark numbers at the cost of higher CPU usage.
 
 ### Benchmark Runs
 
-Use the benchmark runners instead of toggling `benchmark.mode.enabled` manually. They temporarily enable benchmark mode, temporarily force `wait.strategy=BUSY_SPIN` by default (override with the `BENCHMARK_WAIT_STRATEGY` environment variable if needed), run the demo client at the requested rate, capture logs/statistics, generate a colorful HTML report, and then restore the original config/state.
+Use the benchmark runners instead of toggling `benchmark.mode.enabled` manually. They temporarily enable benchmark mode, temporarily force `wait.strategy=BUSY_SPIN` by default for compatibility, run the demo client at the requested rate, capture logs/statistics, generate a colorful HTML report, and then restore the original config/state. At runtime, benchmark mode itself now applies the full aggressive benchmark threading profile automatically.
 
 #### Local benchmark run
 
@@ -1074,8 +1079,21 @@ numactl --cpunodebind=0 --membind=0 java $JAVA_OPTS -jar build/libs/LLExSimulato
 
 ```properties
 # simulator.properties
-wait.strategy=BUSY_SPIN    # Lowest latency, uses 100% of one CPU core
-# wait.strategy=SLEEPING   # Lower CPU; adds ~100 µs worst-case latency
+# Legacy fallback for any thread without an explicit override
+wait.strategy=BUSY_SPIN
+
+# Hot path
+wait.strategy.disruptor=BUSY_SPIN     # MUST for ultra-low-latency
+wait.strategy.fix.poller=BUSY_SPIN    # MUST for ultra-low-latency
+
+# Non-critical background loop
+wait.strategy.metrics.subscriber=SLEEPING
+
+# Aeron dedicated-mode transport threads
+aeron.threading.mode=DEDICATED
+aeron.conductor.idle.strategy=busy_spin
+aeron.sender.idle.strategy=noop
+aeron.receiver.idle.strategy=noop
 ```
 
 ### Ring Buffer Size
@@ -1176,4 +1194,3 @@ LLExSimulator/
 ## License
 
 MIT — use freely for performance testing, development, and research.
-

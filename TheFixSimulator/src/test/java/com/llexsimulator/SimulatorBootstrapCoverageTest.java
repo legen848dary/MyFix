@@ -30,6 +30,12 @@ class SimulatorBootstrapCoverageTest {
     @AfterEach
     void clearAeronDirProperty() {
         System.clearProperty("aeron.dir");
+        System.clearProperty("aeron.threading.mode");
+        System.clearProperty("aeron.conductor.idle.strategy");
+        System.clearProperty("aeron.sender.idle.strategy");
+        System.clearProperty("aeron.receiver.idle.strategy");
+        System.clearProperty("aeron.shared.idle.strategy");
+        System.clearProperty("aeron.shared.network.idle.strategy");
     }
 
     @Test
@@ -44,7 +50,16 @@ class SimulatorBootstrapCoverageTest {
                 "aeron:ipc?term-length=8388608",
                 "aeron:ipc?term-length=65536",
                 1024,
-                "BUSY_SPIN",
+                "SLEEPING",
+                "SLEEPING",
+                "BACKOFF",
+                "SLEEPING",
+                "SHARED",
+                "backoff",
+                "backoff",
+                "backoff",
+                "backoff",
+                "backoff",
                 16,
                 10,
                 true,
@@ -70,6 +85,10 @@ class SimulatorBootstrapCoverageTest {
             bootstrap.start();
 
             assertEquals(config.aeronDir(), System.getProperty("aeron.dir"));
+            assertEquals("DEDICATED", System.getProperty("aeron.threading.mode"));
+            assertEquals("busy_spin", System.getProperty("aeron.conductor.idle.strategy"));
+            assertEquals("noop", System.getProperty("aeron.sender.idle.strategy"));
+            assertEquals("noop", System.getProperty("aeron.receiver.idle.strategy"));
             assertEquals(1, aeronContext.constructed().size());
             assertEquals(1, metricsPublisher.constructed().size());
             assertEquals(1, disruptorPipeline.constructed().size());

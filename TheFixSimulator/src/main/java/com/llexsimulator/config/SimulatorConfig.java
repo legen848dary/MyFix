@@ -17,6 +17,15 @@ public record SimulatorConfig(
         String metricsAeronChannel,
         int    ringBufferSize,
         String waitStrategy,
+        String disruptorWaitStrategy,
+        String fixPollerWaitStrategy,
+        String metricsSubscriberWaitStrategy,
+        String aeronThreadingMode,
+        String aeronConductorIdleStrategy,
+        String aeronSenderIdleStrategy,
+        String aeronReceiverIdleStrategy,
+        String aeronSharedIdleStrategy,
+        String aeronSharedNetworkIdleStrategy,
         int    orderPoolSize,
         int    metricsPublishInterval,
         boolean benchmarkModeEnabled,
@@ -29,7 +38,10 @@ public record SimulatorConfig(
                 8080, "/tmp/aeron-llexsim",
                 AeronRuntimeTuning.DEFAULT_ARTIO_LIBRARY_CHANNEL,
                 AeronRuntimeTuning.DEFAULT_METRICS_CHANNEL,
-                131072, "BUSY_SPIN", 131072, 500, false, true
+                131072, "BUSY_SPIN",
+                "BUSY_SPIN", "BUSY_SPIN", "BUSY_SPIN",
+                "DEDICATED", "busy_spin", "noop", "noop", "backoff", "backoff",
+                131072, 500, false, true
         );
     }
 
@@ -48,10 +60,45 @@ public record SimulatorConfig(
                 metricsAeronChannel,
                 ringBufferSize,
                 waitStrategy,
+                disruptorWaitStrategy,
+                fixPollerWaitStrategy,
+                metricsSubscriberWaitStrategy,
+                aeronThreadingMode,
+                aeronConductorIdleStrategy,
+                aeronSenderIdleStrategy,
+                aeronReceiverIdleStrategy,
+                aeronSharedIdleStrategy,
+                aeronSharedNetworkIdleStrategy,
+                orderPoolSize,
+                metricsPublishInterval,
+                benchmarkModeEnabled,
+                cancelAmendEnabled);
+    }
+
+    public SimulatorConfig withBenchmarkThreadingProfile() {
+        return new SimulatorConfig(
+                fixHost,
+                fixPort,
+                fixLogDir,
+                fixRawMessageLoggingEnabled,
+                webPort,
+                aeronDir,
+                artioLibraryAeronChannel,
+                metricsAeronChannel,
+                ringBufferSize,
+                "BUSY_SPIN",
+                "BUSY_SPIN",
+                "BUSY_SPIN",
+                "BUSY_SPIN",
+                "DEDICATED",
+                "busy_spin",
+                "noop",
+                "noop",
+                aeronSharedIdleStrategy,
+                aeronSharedNetworkIdleStrategy,
                 orderPoolSize,
                 metricsPublishInterval,
                 benchmarkModeEnabled,
                 cancelAmendEnabled);
     }
 }
-
