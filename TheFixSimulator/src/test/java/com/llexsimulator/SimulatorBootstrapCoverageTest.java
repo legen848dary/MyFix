@@ -16,8 +16,11 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
 
+import java.lang.reflect.Field;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -86,5 +89,100 @@ class SimulatorBootstrapCoverageTest {
             verify(aeronContext.constructed().getFirst()).close();
         }
     }
-}
 
+    @Test
+    void stopContinuesWhenSubsystemShutdownThrows() throws Exception {
+        SimulatorBootstrap bootstrap = new SimulatorBootstrap();
+        FixEngineManager fixEngineManager = mock(FixEngineManager.class);
+        MetricsSubscriber metricsSubscriber = mock(MetricsSubscriber.class);
+        WebServer webServer = mock(WebServer.class);
+        DisruptorPipeline disruptorPipeline = mock(DisruptorPipeline.class);
+        MetricsPublisher metricsPublisher = mock(MetricsPublisher.class);
+        AeronContext aeronContext = mock(AeronContext.class);
+
+        doThrow(new RuntimeException("fix")).when(fixEngineManager).stop();
+        doThrow(new RuntimeException("metrics")).when(metricsSubscriber).stop();
+        doThrow(new RuntimeException("web")).when(webServer).stop();
+        doThrow(new RuntimeException("disruptor")).when(disruptorPipeline).shutdown();
+        doThrow(new RuntimeException("publisher")).when(metricsPublisher).close();
+        doThrow(new RuntimeException("aeron")).when(aeronContext).close();
+
+        setField(bootstrap, "fixEngineManager", fixEngineManager);
+        setField(bootstrap, "metricsSubscriber", metricsSubscriber);
+        setField(bootstrap, "webServer", webServer);
+        setField(bootstrap, "disruptorPipeline", disruptorPipeline);
+        setField(bootstrap, "metricsPublisher", metricsPublisher);
+        setField(bootstrap, "aeronContext", aeronContext);
+
+        bootstrap.stop();
+
+        assertEquals(null, readField(bootstrap, "fixEngineManager"));
+        assertEquals(null, readField(bootstrap, "metricsSubscriber"));
+        assertEquals(null, readField(bootstrap, "webServer"));
+        assertEquals(null, readField(bootstrap, "disruptorPipeline"));
+        assertEquals(null, readField(bootstrap, "metricsPublisher"));
+        assertEquals(null, readField(bootstrap, "aeronContext"));
+    }
+
+    @Test
+    void stopInterruptsMetricsThreadIfItRemainsAlive() throws Exception {
+        SimulatorBootstrap bootstrap = new SimulatorBootstrap();
+        MetricsSubscriber metricsSubscriber = mock(MetricsSubscriber.class);
+        Thread metricsThread = Thread.ofPlatform().name("metrics-subscriber-test").unstarted(() -> {
+            try {
+                Thread.sleep(10_000L);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        metricsThread.start();
+
+        setField(bootstrap, "metricsSubscriber", metricsSubscriber);
+        setField(bootstrap, "metricsSubscriberThread", metricsThread);
+
+        bootstrap.stop();
+
+        assertTrue(!metricsThread.isAlive(), "Expected stop() to interrupt and join a lingering metrics thread");
+        assertEquals(null, readField(bootstrap, "metricsSubscriber"));
+        assertEquals(null, readField(bootstrap, "metricsSubscriberThread"));
+    }
+
+    @Test
+    void stopRestoresInterruptFlagWhenJoinIsInterrupted() throws Exception {
+        SimulatorBootstrap bootstrap = new SimulatorBootstrap();
+        MetricsSubscriber metricsSubscriber = mock(MetricsSubscriber.class);
+        Thread metricsThread = Thread.ofPlatform().name("metrics-subscriber-interrupt-test").unstarted(() -> {
+            try {
+                Thread.sleep(10_000L);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        metricsThread.start();
+
+        setField(bootstrap, "metricsSubscriber", metricsSubscriber);
+        setField(bootstrap, "metricsSubscriberThread", metricsThread);
+
+        Thread.currentThread().interrupt();
+        try {
+            bootstrap.stop();
+            assertTrue(Thread.currentThread().isInterrupted(), "Expected stop() to restore the interrupt flag");
+        } finally {
+            Thread.interrupted();
+            metricsThread.interrupt();
+            metricsThread.join(2_000L);
+        }
+    }
+
+    private static void setField(Object target, String name, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(target, value);
+    }
+
+    private static Object readField(Object target, String name) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(target);
+    }
+}
