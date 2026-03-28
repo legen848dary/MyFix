@@ -23,18 +23,76 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Inter:wght@300;400;500;600;700&display=swap');
-    body { font-family: 'Inter', sans-serif; }
+    :root {
+      --bg-app: #0a0f1e;
+      --bg-panel: #0f172a;
+      --bg-panel-alt: #1e293b;
+      --bg-panel-soft: #334155;
+      --border-strong: #334155;
+      --border-soft: #1e293b;
+      --text-primary: #f8fafc;
+      --text-secondary: #cbd5e1;
+      --text-muted: #94a3b8;
+      --text-subtle: #64748b;
+      --chart-grid: #1e293b;
+      --chart-text: #94a3b8;
+      --chart-subtle: #64748b;
+      --chart-p90: #f59e0b;
+      --chart-p90-fill: #f59e0b18;
+      --chart-p75: #10b981;
+      --chart-p75-fill: #10b98118;
+      --chart-p50: #22c55e;
+      --chart-p50-fill: #22c55e18;
+      --scroll-track: #1e293b;
+      --scroll-thumb: #334155;
+    }
+
+    html[data-theme='light'] {
+      --bg-app: #f8fafc;
+      --bg-panel: #ffffff;
+      --bg-panel-alt: #f1f5f9;
+      --bg-panel-soft: #e2e8f0;
+      --border-strong: #cbd5e1;
+      --border-soft: #e2e8f0;
+      --text-primary: #0f172a;
+      --text-secondary: #334155;
+      --text-muted: #475569;
+      --text-subtle: #64748b;
+      --chart-grid: #e2e8f0;
+      --chart-text: #475569;
+      --chart-subtle: #64748b;
+      --scroll-track: #e2e8f0;
+      --scroll-thumb: #94a3b8;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-app);
+      color: var(--text-primary);
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
     .flash-fill   { animation: flashGreen 0.6s ease-out; }
     .flash-reject { animation: flashRed   0.6s ease-out; }
     @keyframes flashGreen { 0%{background:#16a34a33} 100%{background:transparent} }
     @keyframes flashRed   { 0%{background:#dc262633} 100%{background:transparent} }
-    ::-webkit-scrollbar { width:6px } ::-webkit-scrollbar-track { background:#1e293b }
-    ::-webkit-scrollbar-thumb { background:#334155; border-radius:3px }
+    ::-webkit-scrollbar { width:6px }
+    ::-webkit-scrollbar-track { background:var(--scroll-track) }
+    ::-webkit-scrollbar-thumb { background:var(--scroll-thumb); border-radius:3px }
+    .bg-dark-900 { background-color: var(--bg-app) !important; }
+    .bg-dark-800 { background-color: var(--bg-panel) !important; }
+    .bg-dark-700 { background-color: var(--bg-panel-alt) !important; }
+    .bg-dark-600, .hover\:bg-dark-600:hover, .hover\:bg-dark-500:hover { background-color: var(--bg-panel-soft) !important; }
+    .border-dark-700, .border-dark-600, .border-dark-500 { border-color: var(--border-strong) !important; }
+    .text-white, .text-slate-100 { color: var(--text-primary) !important; }
+    .text-slate-300 { color: var(--text-secondary) !important; }
+    .text-slate-400 { color: var(--text-muted) !important; }
+    .text-slate-500 { color: var(--text-subtle) !important; }
+    .hover\:bg-dark-700:hover { background-color: var(--bg-panel-alt) !important; }
+    .hover\:text-white:hover { color: var(--text-primary) !important; }
   </style>
 </head>
 <body class="bg-dark-900 text-slate-100 h-full min-h-screen">
   <div id="app"></div>
-  <script type="module" src="app.js?v=20260323-3"></script>
+  <script type="module" src="app.js?v=20260328-1"></script>
 </body>
 </html>
-

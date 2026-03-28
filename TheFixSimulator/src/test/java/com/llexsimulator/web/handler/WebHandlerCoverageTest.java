@@ -7,20 +7,30 @@ import com.llexsimulator.engine.OrderSessionRegistry;
 import com.llexsimulator.engine.SessionDiagnosticsSnapshot;
 import com.llexsimulator.fill.FillProfileManager;
 import com.llexsimulator.metrics.MetricsRegistry;
+import com.llexsimulator.web.RestApiRouter;
 import com.llexsimulator.web.dto.FillProfileDto;
+import io.vertx.core.Vertx;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
+import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpServerResponse;
+import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import org.junit.jupiter.api.Test;
 import uk.co.real_logic.artio.session.Session;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -201,12 +211,20 @@ class WebHandlerCoverageTest {
         assertEquals(200, disconnectFound.statusCode());
         verify(session).requestDisconnect();
 
+        when(session.resetSequenceNumbers()).thenReturn(42L);
+        CapturedResponse resetFound = capturedResponse();
+        when(resetFound.context().pathParam("id")).thenReturn("FIX.4.4:LLEXSIM->CLIENT1#1");
+        handler.resetSequenceNumbers().handle(resetFound.context());
+        assertEquals(200, resetFound.statusCode());
+        assertTrue(resetFound.body().contains("\"reset\":true"));
+
         Session laterSession = mock(Session.class);
         FixConnection nonMatchingConnection = mock(FixConnection.class);
         FixConnection matchingLaterConnection = mock(FixConnection.class);
         when(nonMatchingConnection.sessionKey()).thenReturn("FIX.4.4:LLEXSIM->OTHER#2");
         when(matchingLaterConnection.sessionKey()).thenReturn("FIX.4.4:LLEXSIM->TARGET#3");
         when(matchingLaterConnection.session()).thenReturn(laterSession);
+        when(laterSession.resetSequenceNumbers()).thenReturn(-1L);
         when(registry.getAllConnections()).thenReturn(List.of(nonMatchingConnection, matchingLaterConnection));
 
         CapturedResponse disconnectFoundLater = capturedResponse();
@@ -215,6 +233,12 @@ class WebHandlerCoverageTest {
         assertEquals(200, disconnectFoundLater.statusCode());
         verify(laterSession).requestDisconnect();
 
+        CapturedResponse resetRejected = capturedResponse();
+        when(resetRejected.context().pathParam("id")).thenReturn("FIX.4.4:LLEXSIM->TARGET#3");
+        handler.resetSequenceNumbers().handle(resetRejected.context());
+        assertEquals(409, resetRejected.statusCode());
+        assertTrue(resetRejected.body().contains("\"reset\":false"));
+
         when(connection.session()).thenReturn(null);
         when(registry.getAllConnections()).thenReturn(List.of(connection));
         CapturedResponse disconnectMissingSession = capturedResponse();
@@ -222,11 +246,21 @@ class WebHandlerCoverageTest {
         handler.disconnect().handle(disconnectMissingSession.context());
         assertEquals(404, disconnectMissingSession.statusCode());
 
+        CapturedResponse resetMissingSession = capturedResponse();
+        when(resetMissingSession.context().pathParam("id")).thenReturn("FIX.4.4:LLEXSIM->CLIENT1#1");
+        handler.resetSequenceNumbers().handle(resetMissingSession.context());
+        assertEquals(409, resetMissingSession.statusCode());
+
         CapturedResponse disconnectMissing = capturedResponse();
         when(registry.getAllConnections()).thenReturn(List.of());
         when(disconnectMissing.context().pathParam("id")).thenReturn("missing");
         handler.disconnect().handle(disconnectMissing.context());
         assertEquals(404, disconnectMissing.statusCode());
+
+        CapturedResponse resetMissing = capturedResponse();
+        when(resetMissing.context().pathParam("id")).thenReturn("missing");
+        handler.resetSequenceNumbers().handle(resetMissing.context());
+        assertEquals(404, resetMissing.statusCode());
 
         ObjectMapper failingMapper = mock(ObjectMapper.class);
         when(failingMapper.writeValueAsString(any())).thenThrow(new RuntimeException("json-fail"));
@@ -248,6 +282,52 @@ class WebHandlerCoverageTest {
         parseLimit.setAccessible(true);
 
         assertEquals(16, parseLimit.invoke(null, new Object[]{null}));
+    }
+
+    @Test
+    void restApiRouterServesSettingsRoutes() throws Exception {
+        Vertx vertx = Vertx.vertx();
+        HttpServer server = null;
+        try {
+            Router router = RestApiRouter.create(
+                    vertx,
+                    new MetricsRegistry(),
+                    new OrderSessionRegistry(false),
+                    new FillProfileManager(),
+                    mock(DisruptorPipeline.class)
+            );
+            server = vertx.createHttpServer()
+                    .requestHandler(router)
+                    .listen(0)
+                    .toCompletionStage()
+                    .toCompletableFuture()
+                    .get(10, TimeUnit.SECONDS);
+
+            HttpClient client = HttpClient.newHttpClient();
+            HttpResponse<String> settingsResponse = client.send(
+                    HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.actualPort() + "/settings"))
+                            .GET()
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString()
+            );
+            assertEquals(200, settingsResponse.statusCode());
+            assertTrue(settingsResponse.body().contains("LLExSimulator"));
+
+            HttpResponse<Void> trailingSlashResponse = client.send(
+                    HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.actualPort() + "/settings/"))
+                            .GET()
+                            .build(),
+                    HttpResponse.BodyHandlers.discarding()
+            );
+            assertEquals(308, trailingSlashResponse.statusCode());
+            assertNotNull(trailingSlashResponse.headers().firstValue("location").orElse(null));
+            assertEquals("/settings", trailingSlashResponse.headers().firstValue("location").orElseThrow());
+        } finally {
+            if (server != null) {
+                server.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            }
+            vertx.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        }
     }
 
     private static CapturedResponse capturedResponse() {
@@ -293,4 +373,3 @@ class WebHandlerCoverageTest {
         }
     }
 }
-

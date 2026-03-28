@@ -72,6 +72,31 @@ public final class SessionHandler {
         };
     }
 
+    public Handler<RoutingContext> resetSequenceNumbers() {
+        return ctx -> {
+            String sessionIdStr = ctx.pathParam("id");
+            boolean found = false;
+            boolean reset = false;
+            long position = 0L;
+            for (FixConnection connection : registry.getAllConnections()) {
+                if (connection.sessionKey().equals(sessionIdStr)) {
+                    found = true;
+                    Session session = connection.session();
+                    if (session != null) {
+                        position = session.resetSequenceNumbers();
+                        reset = position > 0L;
+                    }
+                    break;
+                }
+            }
+            int statusCode = !found ? 404 : reset ? 200 : 409;
+            ctx.response()
+               .putHeader("Content-Type", "application/json")
+               .setStatusCode(statusCode)
+               .end("{\"reset\":" + reset + ",\"found\":" + found + ",\"position\":" + position + "}");
+        };
+    }
+
     private static int parseLimit(String rawLimit) {
         if (rawLimit == null || rawLimit.isBlank()) {
             return 16;
@@ -83,4 +108,3 @@ public final class SessionHandler {
         }
     }
 }
-

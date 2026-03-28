@@ -50,10 +50,17 @@ public final class RestApiRouter {
         router.get("/api/sessions").handler(sessionHandler.list());
         router.get("/api/sessions/recent-disconnects").handler(sessionHandler.recentDisconnects());
         router.delete("/api/sessions/:id").handler(sessionHandler.disconnect());
+        router.post("/api/sessions/:id/reset-sequence").handler(sessionHandler.resetSequenceNumbers());
 
         // ── Benchmark Reports ──────────────────────────────────────────────────
         router.get("/reports").handler(benchmarkReportsHandler.index());
         router.get("/reports/:runId").handler(benchmarkReportsHandler.show());
+
+        router.getWithRegex("^/settings$").handler(ctx -> ctx.reroute("/index.html"));
+        router.getWithRegex("^/settings/$").handler(ctx -> ctx.response()
+                .setStatusCode(308)
+                .putHeader("location", "/settings")
+                .end());
 
         // ── Static SPA (Vue.js 3 + Tailwind) ─────────────────────────────────
         router.route("/*").handler(StaticHandler.create("web")
@@ -62,4 +69,3 @@ public final class RestApiRouter {
         return router;
     }
 }
-

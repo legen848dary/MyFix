@@ -207,6 +207,29 @@ final class TheFixClientFixService implements Application, AutoCloseable {
                 : "No live FIX session is connected yet. Use Prime session or Start demo flow to establish logon.");
     }
 
+    synchronized ActionOutcome resetSequenceNumbers() {
+        SessionID sessionId = activeSessionId.get();
+        if (!loggedOn || sessionId == null) {
+            return new ActionOutcome(false, "Connect the selected FIX session before resetting sequence numbers.");
+        }
+
+        @SuppressWarnings("resource")
+        Session quickFixSession = Session.lookupSession(sessionId);
+        if (quickFixSession == null || !quickFixSession.isLoggedOn()) {
+            return new ActionOutcome(false, "QuickFIX/J session is not logged on yet.");
+        }
+
+        try {
+            quickFixSession.reset();
+            addEvent("SUCCESS", "Sequence numbers reset", "Reset inbound and outbound FIX sequence numbers for " + sessionId + '.');
+            return new ActionOutcome(true, "FIX sequence numbers reset to 1.");
+        } catch (Exception exception) {
+            addEvent("WARN", "Sequence reset failed", rootMessage(exception));
+            log.warn("Unable to reset FIX sequence numbers for profile {}", runtimeProfile.name(), exception);
+            return new ActionOutcome(false, "Unable to reset FIX sequence numbers: " + rootMessage(exception));
+        }
+    }
+
     synchronized void startAutoFlow(TheFixOrderRequest template, TheFixBulkOptions requestedOptions) {
         TheFixBulkOptions effectiveOptions = requestedOptions == null
                 ? new TheFixBulkOptions("FIXED_RATE", config.defaultRatePerSecond(), 10, 1_000, 0)
@@ -619,6 +642,9 @@ final class TheFixClientFixService implements Application, AutoCloseable {
             return "Execution report rejected (OrdRejReason=" + code + ")";
         }
         return "Execution report rejected";
+    }
+
+    record ActionOutcome(boolean success, String message) {
     }
 
     private void rememberOrder(OrderView orderView) {

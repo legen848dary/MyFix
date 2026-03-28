@@ -167,6 +167,29 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         return pulseTest(new JsonObject());
     }
 
+    synchronized JsonObject resetSequenceNumbers(JsonObject request) {
+        TheFixSessionProfile selectedProfile = profileForRequest(request);
+        TheFixClientFixService service = fixServices.get(selectedProfile.name());
+        if (service == null) {
+            return snapshot(selectedProfile.name()).put("actionResult", new JsonObject()
+                    .put("success", false)
+                    .put("type", "reset-sequence")
+                    .put("profileName", selectedProfile.name())
+                    .put("message", "Connect the selected FIX session before resetting sequence numbers."));
+        }
+
+        TheFixClientFixService.ActionOutcome outcome = service.resetSequenceNumbers();
+        return snapshot(selectedProfile.name()).put("actionResult", new JsonObject()
+                .put("success", outcome.success())
+                .put("type", "reset-sequence")
+                .put("profileName", selectedProfile.name())
+                .put("message", outcome.message()));
+    }
+
+    synchronized JsonObject resetSequenceNumbers() {
+        return resetSequenceNumbers(new JsonObject());
+    }
+
     synchronized JsonObject sendOrder(JsonObject request) {
         TheFixSessionProfile selectedProfile = profileForRequest(request);
         JsonObject conflict = rejectOrResolveSessionIdentityConflict(selectedProfile, "send");

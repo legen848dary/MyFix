@@ -1213,6 +1213,26 @@ createApp({
                     </div>
                   </div>
                 </div>
+
+                <div class="compact-card">
+                  <p class="eyebrow">FIX sequence reset</p>
+                  <p class="compact-card__copy">Reset inbound and outbound FIX sequence numbers for the currently selected live session profile.</p>
+                  <div class="order-grid order-grid--comfortable" style="margin-top: 12px;">
+                    <div class="field">
+                      <span class="field__label">Selected profile</span>
+                      <input :value="selectedProfileName" readonly />
+                    </div>
+                    <div class="field">
+                      <span class="field__label">Session state</span>
+                      <input :value="canResetSelectedSession ? 'Connected' : 'Connect the session first'" readonly />
+                    </div>
+                  </div>
+                  <div class="button-row" style="margin-top: 12px;">
+                    <button class="button button--danger" @click="resetFixSequenceNumbers" :disabled="busyAction === 'reset-sequence' || !canResetSelectedSession">
+                      {{ busyAction === 'reset-sequence' ? 'Resetting…' : 'Reset FIX Sequence Numbers' }}
+                    </button>
+                  </div>
+                </div>
               </section>
             </div>
           </article>
@@ -1484,6 +1504,7 @@ createApp({
     const isSessionScopedPage = computed(() => ['order-input', 'order-blotter', 'fix-messages'].includes(activePage.value))
     const activeSessionProfileLabel = computed(() => session.profileName || sessionProfilesState.activeProfileName || 'Default profile')
     const selectedRuntimeSession = computed(() => (runtimeSessions.value || []).find(item => item.profileName === selectedProfileName.value) || null)
+    const canResetSelectedSession = computed(() => Boolean(selectedRuntimeSession.value?.connected))
     const sessionControlCards = computed(() => {
       const cardsByProfile = new Map()
       const profileOrder = new Map((sessionProfilesState.profiles || []).map((profile, index) => [profile.name, index]))
@@ -2573,6 +2594,16 @@ createApp({
       method: 'POST',
       body: JSON.stringify(withSelectedProfile())
     }), true))
+    const resetFixSequenceNumbers = async () => runAction('reset-sequence', async () => {
+      const payload = await apiCall('/api/session/reset-sequence', {
+        method: 'POST',
+        body: JSON.stringify(withSelectedProfile())
+      })
+      applyOverview(payload, true)
+      if (!payload?.actionResult?.success) {
+        window.alert(payload?.actionResult?.message || 'Unable to reset FIX sequence numbers for the selected session profile.')
+      }
+    })
 
     const connectProfile = async (profileName) => {
       syncSelectedProfileDraft(profileName)
@@ -2989,6 +3020,7 @@ createApp({
       isSessionScopedPage,
       activeSessionProfileLabel,
       selectedRuntimeSession,
+      canResetSelectedSession,
       sessionControlCards,
       aboutComponents,
       aboutCapabilities,
@@ -3097,6 +3129,7 @@ createApp({
       selectRuntimeProfile,
       toggleRuntimeSession,
       pulseTest,
+      resetFixSequenceNumbers,
       sendTicket,
       startBulkFlow,
       stopBulkFlow,

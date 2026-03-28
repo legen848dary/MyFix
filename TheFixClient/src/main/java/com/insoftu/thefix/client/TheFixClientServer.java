@@ -50,6 +50,7 @@ final class TheFixClientServer {
         router.post("/api/session/connect").handler(ctx -> writeJson(ctx.response(), workbenchState.connect(bodyJson(ctx))));
         router.post("/api/session/disconnect").handler(ctx -> writeJson(ctx.response(), workbenchState.disconnect(bodyJson(ctx))));
         router.post("/api/session/pulse-test").handler(ctx -> writeJson(ctx.response(), workbenchState.pulseTest(bodyJson(ctx))));
+        router.post("/api/session/reset-sequence").handler(ctx -> writeJson(ctx.response(), workbenchState.resetSequenceNumbers(bodyJson(ctx))));
         router.post("/api/settings/profiles/save").handler(ctx -> writeJson(ctx.response(), workbenchState.saveSettingsProfile(bodyJson(ctx))));
         router.post("/api/settings/profiles/activate").handler(ctx -> writeJson(ctx.response(), workbenchState.activateSettingsProfile(bodyJson(ctx))));
         router.post("/api/settings/profiles/delete").handler(ctx -> writeJson(ctx.response(), workbenchState.deleteSettingsProfile(bodyJson(ctx))));
@@ -147,5 +148,4 @@ final class TheFixClientServer {
         }
     }
 }
-
 

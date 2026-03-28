@@ -120,6 +120,17 @@ class TheFixClientWorkbenchStateTest {
     }
 
     @Test
+    void resettingSequenceNumbersRequiresALiveSession() {
+        TheFixClientWorkbenchState state = createState();
+
+        JsonObject response = state.resetSequenceNumbers(new JsonObject().put("profileName", "Default profile"));
+
+        assertFalse(response.getJsonObject("actionResult").getBoolean("success"));
+        assertTrue(response.getJsonObject("actionResult").getString("message").contains("Connect"));
+        state.close();
+    }
+
+    @Test
     void previewOrderReturnsWarningsForInvalidInput() {
         TheFixClientWorkbenchState state = createState();
 
@@ -311,4 +322,3 @@ class TheFixClientWorkbenchStateTest {
         return new TheFixClientWorkbenchState(testConfig(), store, new TheFixMessageTemplateStore(tempDir.resolve("templates-db").resolve("message-templates")));
     }
 }
-
