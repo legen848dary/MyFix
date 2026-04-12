@@ -26,6 +26,8 @@ final class TheFixCucumberRunner {
 
     private static final Logger log = LoggerFactory.getLogger(TheFixCucumberRunner.class);
 
+    private static final double DEFAULT_BULK_ORDER_PRICE = 100.25;
+
     // -----------------------------------------------------------------------
     // Step patterns
     // -----------------------------------------------------------------------
@@ -845,7 +847,7 @@ final class TheFixCucumberRunner {
                                           int burstSize,
                                           int burstIntervalMs,
                                           int totalOrders) {
-        double effectivePrice = "FIXED_RATE".equals(bulkMode) || "BURST".equals(bulkMode) ? 100.25 : price;
+        double effectivePrice = "FIXED_RATE".equals(bulkMode) || "BURST".equals(bulkMode) ? DEFAULT_BULK_ORDER_PRICE : price;
         return profileReq(ctx)
                 .put("messageType", "NEW_ORDER_SINGLE")
                 .put("clOrdId", "")
