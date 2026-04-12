@@ -65,6 +65,7 @@ final class TheFixClientServer {
         router.post("/api/orders/cancel").handler(ctx -> writeJson(ctx.response(), workbenchState.cancelBlotterOrder(bodyJson(ctx))));
         router.post("/api/order-flow/start").handler(ctx -> writeJson(ctx.response(), workbenchState.startOrderFlow(bodyJson(ctx))));
         router.post("/api/order-flow/stop").handler(ctx -> writeJson(ctx.response(), workbenchState.stopOrderFlow(bodyJson(ctx))));
+        router.post("/api/cucumber/run").handler(ctx -> writeJson(ctx.response(), workbenchState.runCucumber(bodyJson(ctx))));
 
         router.get("/api/fix-messages").handler(ctx -> {
             int limit = Math.max(1, Math.min(parseIntParam(ctx.request().getParam("limit"), 20), 100));
@@ -72,8 +73,8 @@ final class TheFixClientServer {
             writeJson(ctx.response(), workbenchState.recentFixMessages(limit, offset, ctx.request().getParam("profileName")));
         });
 
-        router.getWithRegex("^/(home|neworder|order|orders|blotter|settings|session-profiles|sessionprofiles|recentfixmsgs|about)$").handler(ctx -> ctx.reroute("/index.html"));
-        router.getWithRegex("^/(home|neworder|order|orders|blotter|settings|session-profiles|sessionprofiles|recentfixmsgs|about)/$").handler(ctx -> ctx.response()
+        router.getWithRegex("^/(home|neworder|order|orders|blotter|settings|session-profiles|sessionprofiles|recentfixmsgs|cucumber|about)$").handler(ctx -> ctx.reroute("/index.html"));
+        router.getWithRegex("^/(home|neworder|order|orders|blotter|settings|session-profiles|sessionprofiles|recentfixmsgs|cucumber|about)/$").handler(ctx -> ctx.response()
                 .setStatusCode(308)
                 .putHeader("location", ctx.request().path().substring(0, ctx.request().path().length() - 1))
                 .end());

@@ -15,7 +15,8 @@ const REFRESH_FREQUENCY_OPTIONS = Object.freeze([1, 3, 5])
 const PAGE_OPTIONS = [
   { code: 'order-input', label: 'Create Order' },
   { code: 'order-blotter', label: 'My Orders' },
-  { code: 'fix-messages', label: 'Fix In/Out' }
+  { code: 'fix-messages', label: 'Fix In/Out' },
+  { code: 'scenario-runner', label: 'Scenario Runner' }
 ]
 
 const PAGE_PATHS = Object.freeze({
@@ -23,6 +24,7 @@ const PAGE_PATHS = Object.freeze({
   'order-blotter': '/orders',
   'fix-messages': '/recentfixmsgs',
   'session-profiles': '/session-profiles',
+  'scenario-runner': '/cucumber',
   about: '/about',
   settings: '/settings'
 })
@@ -89,6 +91,8 @@ function pageCodeFromPath(pathname) {
       return 'order-blotter'
     case '/recentfixmsgs':
       return 'fix-messages'
+    case '/cucumber':
+      return 'scenario-runner'
     case '/session-profiles':
     case '/sessionprofiles':
       return 'session-profiles'
@@ -1148,6 +1152,160 @@ createApp({
         </section>
       </main>
 
+      <main v-else-if="activePage === 'scenario-runner'" class="workspace workspace--single">
+        <section class="stack">
+          <article class="panel">
+            <div class="panel__header">
+              <div>
+                <h2 class="panel__title">Scenario Runner</h2>
+                <p class="panel__copy">Write or paste a Gherkin feature file, then click Run to execute scenarios automatically against the live FIX session. All order sending methods (single, fixed-rate bulk, burst bulk) and response verifications are supported.</p>
+              </div>
+              <span class="chip" :class="cucumberResult ? (cucumberResult.status === 'PASSED' ? 'chip--success' : 'chip--danger') : 'chip--neutral'">
+                {{ cucumberResult ? cucumberResult.status : 'Ready' }}
+              </span>
+            </div>
+            <div class="panel__body cucumber-layout">
+
+              <section class="stack">
+                <div class="compact-card">
+                  <div class="cucumber-editor-header">
+                    <p class="eyebrow">Feature file</p>
+                    <div class="button-row">
+                      <button class="button button--soft" @click="loadCucumberSample" :disabled="cucumberRunning">Load sample</button>
+                      <button class="button button--primary" @click="runCucumberScenarios" :disabled="cucumberRunning || !cucumberFeatureText.trim()">
+                        {{ cucumberRunning ? 'Running…' : 'Run scenarios' }}
+                      </button>
+                    </div>
+                  </div>
+                  <textarea
+                    v-model="cucumberFeatureText"
+                    class="cucumber-editor"
+                    placeholder="Paste a Gherkin feature file here or click &#x27;Load sample&#x27; to see an example…"
+                    spellcheck="false"></textarea>
+                  <p class="compact-card__copy" style="margin-top: 10px;">
+                    Supported step keywords: <span class="mono">Given</span>, <span class="mono">When</span>, <span class="mono">Then</span>, <span class="mono">And</span>, <span class="mono">But</span>.
+                    Scenario Outlines with Examples tables are fully supported.
+                  </p>
+                </div>
+
+                <div class="compact-card cucumber-step-reference">
+                  <p class="eyebrow">Step reference</p>
+                  <div class="cucumber-step-ref-grid">
+                    <div class="cucumber-step-ref-group">
+                      <p class="cucumber-step-ref-title">Session</p>
+                      <ul class="cucumber-step-ref-list">
+                        <li><span class="mono">the FIX session is connected</span></li>
+                        <li><span class="mono">the FIX session for profile "name" is connected</span></li>
+                        <li><span class="mono">the FIX session is disconnected</span></li>
+                        <li><span class="mono">I wait N seconds</span></li>
+                      </ul>
+                    </div>
+                    <div class="cucumber-step-ref-group">
+                      <p class="cucumber-step-ref-title">Single Order</p>
+                      <ul class="cucumber-step-ref-list">
+                        <li><span class="mono">I send a New Order Single for N shares of "SYM"</span></li>
+                        <li><span class="mono">I send a New Order Single to buy/sell N shares of "SYM" at P</span></li>
+                        <li><span class="mono">I send a New Order Single to buy N shares of "SYM" as MARKET order</span></li>
+                        <li><span class="mono">I send a BUY New Order Single for N shares of "SYM" at P with TIF DAY</span></li>
+                        <li><span class="mono">I send a STOP order to buy N shares of "SYM" at stop P</span></li>
+                        <li><span class="mono">I send a STOP_LIMIT order to buy N shares of "SYM" at limit P stop S</span></li>
+                        <li><span class="mono">I send a New Order Single for N shares of "SYM" on market "MKT"</span></li>
+                      </ul>
+                    </div>
+                    <div class="cucumber-step-ref-group">
+                      <p class="cucumber-step-ref-title">Cancel / Amend</p>
+                      <ul class="cucumber-step-ref-list">
+                        <li><span class="mono">I cancel the order with ClOrdID "ID"</span></li>
+                        <li><span class="mono">I cancel the most recently sent order</span></li>
+                        <li><span class="mono">I amend the order with ClOrdID "ID" to quantity N and price P</span></li>
+                      </ul>
+                    </div>
+                    <div class="cucumber-step-ref-group">
+                      <p class="cucumber-step-ref-title">Bulk Flow</p>
+                      <ul class="cucumber-step-ref-list">
+                        <li><span class="mono">I start a fixed rate bulk flow at N orders per second</span></li>
+                        <li><span class="mono">I start a fixed rate bulk flow of N total orders at R orders per second</span></li>
+                        <li><span class="mono">I start a burst bulk flow with N orders per burst every M ms</span></li>
+                        <li><span class="mono">I start a burst bulk flow of N total orders with B per burst every M ms</span></li>
+                        <li><span class="mono">I stop the bulk order flow</span></li>
+                      </ul>
+                    </div>
+                    <div class="cucumber-step-ref-group">
+                      <p class="cucumber-step-ref-title">Verification</p>
+                      <ul class="cucumber-step-ref-list">
+                        <li><span class="mono">the session should be connected</span></li>
+                        <li><span class="mono">the session should not be connected</span></li>
+                        <li><span class="mono">the sent orders count should be at least N</span></li>
+                        <li><span class="mono">the sent orders count should be exactly N</span></li>
+                        <li><span class="mono">the execution report count should be at least N</span></li>
+                        <li><span class="mono">the order blotter should contain at least N orders</span></li>
+                        <li><span class="mono">the order blotter should contain an order with symbol "SYM"</span></li>
+                        <li><span class="mono">the order blotter should contain an order with status "STATUS"</span></li>
+                        <li><span class="mono">the FIX tape should contain at least N messages</span></li>
+                        <li><span class="mono">the cancel count should be at least N</span></li>
+                        <li><span class="mono">the reject count should be at most N</span></li>
+                        <li><span class="mono">the bulk flow should be running</span></li>
+                        <li><span class="mono">the bulk flow should not be running</span></li>
+                        <li><span class="mono">the send failure count should be N</span></li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="stack">
+                <div v-if="!cucumberResult && !cucumberRunning" class="compact-card">
+                  <p class="eyebrow">Results</p>
+                  <p class="compact-card__copy">Run scenarios to see results here.</p>
+                </div>
+
+                <div v-if="cucumberRunning" class="compact-card">
+                  <p class="eyebrow">Running…</p>
+                  <p class="compact-card__copy">Executing scenarios against the live FIX session. This may take a moment.</p>
+                </div>
+
+                <div v-if="cucumberResult && !cucumberRunning" class="compact-card">
+                  <div class="cucumber-results-header">
+                    <p class="eyebrow">{{ cucumberResult.featureName || 'Feature' }}</p>
+                    <div class="chip-row">
+                      <span class="chip" :class="cucumberResult.status === 'PASSED' ? 'chip--success' : 'chip--danger'">{{ cucumberResult.status }}</span>
+                      <span class="chip chip--neutral">{{ cucumberResult.totalScenarios }} scenarios</span>
+                      <span class="chip chip--success" v-if="cucumberResult.passed > 0">{{ cucumberResult.passed }} passed</span>
+                      <span class="chip chip--danger" v-if="cucumberResult.failed > 0">{{ cucumberResult.failed }} failed</span>
+                      <span class="chip chip--neutral" v-if="cucumberResult.skipped > 0">{{ cucumberResult.skipped }} skipped</span>
+                    </div>
+                  </div>
+
+                  <div v-if="cucumberResult.error" class="cucumber-error">
+                    <p class="eyebrow">Error</p>
+                    <p class="compact-card__copy">{{ cucumberResult.error }}</p>
+                  </div>
+
+                  <div v-for="scenario in (cucumberResult.scenarios || [])" :key="scenario.name"
+                       class="cucumber-scenario" :class="cucumberScenarioStatusClass(scenario.status)">
+                    <div class="cucumber-scenario__header">
+                      <span class="cucumber-scenario__keyword">Scenario</span>
+                      <span class="cucumber-scenario__name">{{ scenario.name }}</span>
+                      <span class="chip" :class="scenario.status === 'PASSED' ? 'chip--success' : scenario.status === 'SKIPPED' ? 'chip--neutral' : 'chip--danger'">{{ scenario.status }}</span>
+                    </div>
+                    <ul class="cucumber-steps">
+                      <li v-for="step in (scenario.steps || [])" :key="step.keyword + step.text"
+                          class="cucumber-step" :class="cucumberStepStatusClass(step.status)">
+                        <span class="cucumber-step__icon" aria-hidden="true">{{ cucumberStepIcon(step.status) }}</span>
+                        <span class="cucumber-step__keyword mono">{{ step.keyword }}</span>
+                        <span class="cucumber-step__text">{{ step.text }}</span>
+                        <span v-if="step.message" class="cucumber-step__message">{{ step.message }}</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </section>
+
+            </div>
+          </article>
+        </section>
+      </main>
+
       <main v-else class="workspace workspace--single">
         <section class="stack">
           <article class="panel">
@@ -1432,6 +1590,138 @@ createApp({
     const ordersStatusFilter = ref('')
     const ordersSourceFilter = ref('')
 
+    // --- Scenario runner state ---
+    const cucumberFeatureText = ref('')
+    const cucumberRunning = ref(false)
+    const cucumberResult = ref(null)
+    const CUCUMBER_SAMPLE_FEATURE = `Feature: FIX Order Sending and Verification
+
+  Background:
+    Given the FIX session is connected
+
+  Scenario: Send a single market buy order
+    When I send a New Order Single for 100 shares of "AAPL"
+    Then the sent orders count should be at least 1
+    And the order blotter should contain at least 1 order
+
+  Scenario: Send a single limit buy order
+    When I send a New Order Single to buy 200 shares of "MSFT" at 415.50
+    Then the sent orders count should be at least 1
+    And the order blotter should contain an order with symbol "MSFT"
+
+  Scenario: Send a single limit sell order
+    When I send a New Order Single to sell 150 shares of "NVDA" at 875.00
+    Then the sent orders count should be at least 1
+
+  Scenario: Send a single sell-short order
+    When I send a New Order Single to sell short 100 shares of "AMZN" at 200.00
+    Then the sent orders count should be at least 1
+
+  Scenario: Send a stop order
+    When I send a STOP order to buy 100 shares of "AAPL" at stop 172.50
+    Then the sent orders count should be at least 1
+
+  Scenario: Send a stop-limit order
+    When I send a STOP_LIMIT order to buy 100 shares of "IBM" at limit 145.00 stop 144.00
+    Then the sent orders count should be at least 1
+
+  Scenario: Send a New Order Single as a market-on-close order
+    When I send a New Order Single to buy 100 shares of "GS" as MARKET_ON_CLOSE order
+    Then the sent orders count should be at least 1
+
+  Scenario: Send orders with different time-in-force values
+    When I send a BUY New Order Single for 100 shares of "AAPL" at 170.00 with TIF IOC
+    And I send a BUY New Order Single for 100 shares of "AAPL" at 170.00 with TIF FOK
+    And I send a BUY New Order Single for 100 shares of "AAPL" at 170.00 with TIF GTC
+    And I send a BUY New Order Single for 100 shares of "AAPL" at 170.00 with TIF DAY
+    Then the sent orders count should be at least 4
+
+  Scenario: Send order on a specific market
+    When I send a New Order Single for 100 shares of "BP.L" on market "XLON"
+    Then the sent orders count should be at least 1
+    And the order blotter should contain an order with symbol "BP.L"
+
+  Scenario: Run a fixed rate bulk flow and stop it
+    When I start a fixed rate bulk flow of 10 total orders at 5 orders per second
+    Then the bulk flow should be running
+    When I wait 3 seconds
+    And I stop the bulk order flow
+    Then the bulk flow should not be running
+    And the sent orders count should be at least 1
+
+  Scenario: Run a continuous fixed rate bulk flow
+    When I start a fixed rate bulk flow at 10 orders per second
+    Then the bulk flow should be running
+    When I wait 2 seconds
+    And I stop the bulk order flow
+    Then the bulk flow should not be running
+
+  Scenario: Run a burst bulk flow and stop it
+    When I start a burst bulk flow of 20 total orders with 5 per burst every 500 ms
+    Then the bulk flow should be running
+    When I wait 3 seconds
+    And I stop the bulk order flow
+    Then the bulk flow should not be running
+    And the sent orders count should be at least 1
+
+  Scenario: Run a continuous burst bulk flow
+    When I start a burst bulk flow with 10 orders per burst every 1000 ms
+    Then the bulk flow should be running
+    When I wait 2 seconds
+    And I stop the bulk order flow
+    Then the bulk flow should not be running
+
+  Scenario: Verify FIX tape captures messages after sending
+    When I send a New Order Single for 100 shares of "AAPL"
+    Then the FIX tape should contain at least 1 message
+
+  Scenario: Verify execution report count
+    When I send a New Order Single for 200 shares of "MSFT"
+    Then the execution report count should be at least 0
+
+  Scenario: Verify zero send failures
+    When I send a New Order Single for 100 shares of "AAPL"
+    Then the send failure count should be 0
+
+  Scenario: Verify reject count upper bound
+    When I send a New Order Single for 100 shares of "NVDA" at 875.00
+    Then the reject count should be at most 100
+
+  Scenario Outline: Bulk flow with different rates
+    When I start a fixed rate bulk flow of <total> total orders at <rate> orders per second
+    Then the bulk flow should be running
+    When I stop the bulk order flow
+    Then the bulk flow should not be running
+
+    Examples:
+      | total | rate |
+      | 5     | 2    |
+      | 20    | 10   |
+      | 50    | 25   |
+
+  Scenario Outline: Send orders for multiple symbols
+    When I send a New Order Single to buy <qty> shares of "<symbol>" at <price>
+    Then the sent orders count should be at least 1
+    And the order blotter should contain an order with symbol "<symbol>"
+
+    Examples:
+      | symbol | qty | price  |
+      | AAPL   | 100 | 170.00 |
+      | MSFT   | 200 | 415.00 |
+      | NVDA   | 50  | 875.00 |
+      | AMZN   | 75  | 200.00 |
+
+  Scenario Outline: Send orders with various order types
+    When I send a New Order Single to buy 100 shares of "AAPL" as <orderType> order
+    Then the sent orders count should be at least 1
+
+    Examples:
+      | orderType         |
+      | MARKET            |
+      | LIMIT             |
+      | MARKET_ON_CLOSE   |
+`
+
     const amendDraft = reactive({
       clOrdId: '',
       symbol: '',
@@ -1501,7 +1791,7 @@ createApp({
     })
     const refreshFrequencyLabel = (seconds) => `${seconds} second${seconds === 1 ? '' : 's'}`
     const currentRefreshFrequencyLabel = computed(() => refreshFrequencyLabel(activeRefreshSeconds.value))
-    const isSessionScopedPage = computed(() => ['order-input', 'order-blotter', 'fix-messages'].includes(activePage.value))
+    const isSessionScopedPage = computed(() => ['order-input', 'order-blotter', 'fix-messages', 'scenario-runner'].includes(activePage.value))
     const activeSessionProfileLabel = computed(() => session.profileName || sessionProfilesState.activeProfileName || 'Default profile')
     const selectedRuntimeSession = computed(() => (runtimeSessions.value || []).find(item => item.profileName === selectedProfileName.value) || null)
     const canResetSelectedSession = computed(() => Boolean(selectedRuntimeSession.value?.connected))
@@ -2994,6 +3284,57 @@ createApp({
       }
     })
 
+    const loadCucumberSample = () => {
+      cucumberFeatureText.value = CUCUMBER_SAMPLE_FEATURE
+    }
+
+    const runCucumberScenarios = async () => {
+      if (cucumberRunning.value) return
+      cucumberRunning.value = true
+      cucumberResult.value = null
+      try {
+        const data = await apiCall('/api/cucumber/run', {
+          method: 'POST',
+          body: JSON.stringify({
+            featureText: cucumberFeatureText.value || '',
+            profileName: selectedProfileName.value || ''
+          })
+        })
+        cucumberResult.value = data
+      } catch (error) {
+        cucumberResult.value = {
+          status: 'FAILED',
+          featureName: 'Error',
+          totalScenarios: 0,
+          passed: 0,
+          failed: 0,
+          skipped: 0,
+          scenarios: [],
+          error: error.message || 'Unable to reach the backend'
+        }
+      } finally {
+        cucumberRunning.value = false
+      }
+    }
+
+    const cucumberScenarioStatusClass = (status) => {
+      if (status === 'PASSED') return 'cucumber-scenario--passed'
+      if (status === 'SKIPPED') return 'cucumber-scenario--skipped'
+      return 'cucumber-scenario--failed'
+    }
+
+    const cucumberStepStatusClass = (status) => {
+      if (status === 'PASSED') return 'cucumber-step--passed'
+      if (status === 'SKIPPED') return 'cucumber-step--skipped'
+      return 'cucumber-step--failed'
+    }
+
+    const cucumberStepIcon = (status) => {
+      if (status === 'PASSED') return '✔'
+      if (status === 'SKIPPED') return '⊘'
+      return '✘'
+    }
+
     return {
       overview,
       session,
@@ -3166,7 +3507,15 @@ createApp({
       selectTheme,
       selectRefreshFrequency,
       refreshFrequencyLabel,
-      openPage
+      openPage,
+      cucumberFeatureText,
+      cucumberRunning,
+      cucumberResult,
+      loadCucumberSample,
+      runCucumberScenarios,
+      cucumberScenarioStatusClass,
+      cucumberStepStatusClass,
+      cucumberStepIcon
     }
   }
 }).mount('#app')

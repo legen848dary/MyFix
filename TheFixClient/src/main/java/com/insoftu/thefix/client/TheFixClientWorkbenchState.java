@@ -271,6 +271,14 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         return stopOrderFlow(new JsonObject());
     }
 
+    JsonObject runCucumber(JsonObject request) {
+        String featureText = request == null ? "" : request.getString("featureText", "");
+        String profileName = request == null ? null : request.getString("profileName");
+        String resolvedProfile = profileForName(profileName).name();
+        TheFixCucumberRunner runner = new TheFixCucumberRunner(this);
+        return runner.run(featureText, resolvedProfile);
+    }
+
     synchronized JsonObject previewOrder(JsonObject request) {
         TheFixSessionProfile selectedProfile = profileForRequest(request);
         TheFixClientFixService service = fixServices.get(selectedProfile.name());
