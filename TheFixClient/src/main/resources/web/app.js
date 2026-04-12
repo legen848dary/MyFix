@@ -1172,6 +1172,7 @@ createApp({
                     <p class="eyebrow">Feature file</p>
                     <div class="button-row">
                       <button class="button button--soft" @click="loadCucumberSample" :disabled="cucumberRunning">Load sample</button>
+                      <button class="button button--soft" @click="uploadFeatureFile" :disabled="cucumberRunning">Upload .feature</button>
                       <button class="button button--primary" @click="runCucumberScenarios" :disabled="cucumberRunning || !cucumberFeatureText.trim()">
                         {{ cucumberRunning ? 'Running…' : 'Run scenarios' }}
                       </button>
@@ -1180,7 +1181,7 @@ createApp({
                   <textarea
                     v-model="cucumberFeatureText"
                     class="cucumber-editor"
-                    placeholder="Paste a Gherkin feature file here or click &#x27;Load sample&#x27; to see an example…"
+                    placeholder="Paste a Gherkin feature file here, click &#x27;Upload .feature&#x27; to load from disk, or click &#x27;Load sample&#x27; to see an example…"
                     spellcheck="false"></textarea>
                   <p class="compact-card__copy" style="margin-top: 10px;">
                     Supported step keywords: <span class="mono">Given</span>, <span class="mono">When</span>, <span class="mono">Then</span>, <span class="mono">And</span>, <span class="mono">But</span>.
@@ -1594,133 +1595,6 @@ createApp({
     const cucumberFeatureText = ref('')
     const cucumberRunning = ref(false)
     const cucumberResult = ref(null)
-    const CUCUMBER_SAMPLE_FEATURE = `Feature: FIX Order Sending and Verification
-
-  Background:
-    Given the FIX session is connected
-
-  Scenario: Send a single market buy order
-    When I send a New Order Single for 100 shares of "AAPL"
-    Then the sent orders count should be at least 1
-    And the order blotter should contain at least 1 order
-
-  Scenario: Send a single limit buy order
-    When I send a New Order Single to buy 200 shares of "MSFT" at 415.50
-    Then the sent orders count should be at least 1
-    And the order blotter should contain an order with symbol "MSFT"
-
-  Scenario: Send a single limit sell order
-    When I send a New Order Single to sell 150 shares of "NVDA" at 875.00
-    Then the sent orders count should be at least 1
-
-  Scenario: Send a single sell-short order
-    When I send a New Order Single to sell short 100 shares of "AMZN" at 200.00
-    Then the sent orders count should be at least 1
-
-  Scenario: Send a stop order
-    When I send a STOP order to buy 100 shares of "AAPL" at stop 172.50
-    Then the sent orders count should be at least 1
-
-  Scenario: Send a stop-limit order
-    When I send a STOP_LIMIT order to buy 100 shares of "IBM" at limit 145.00 stop 144.00
-    Then the sent orders count should be at least 1
-
-  Scenario: Send a New Order Single as a market-on-close order
-    When I send a New Order Single to buy 100 shares of "GS" as MARKET_ON_CLOSE order
-    Then the sent orders count should be at least 1
-
-  Scenario: Send orders with different time-in-force values
-    When I send a BUY New Order Single for 100 shares of "AAPL" at 170.00 with TIF IOC
-    And I send a BUY New Order Single for 100 shares of "AAPL" at 170.00 with TIF FOK
-    And I send a BUY New Order Single for 100 shares of "AAPL" at 170.00 with TIF GTC
-    And I send a BUY New Order Single for 100 shares of "AAPL" at 170.00 with TIF DAY
-    Then the sent orders count should be at least 4
-
-  Scenario: Send order on a specific market
-    When I send a New Order Single for 100 shares of "BP.L" on market "XLON"
-    Then the sent orders count should be at least 1
-    And the order blotter should contain an order with symbol "BP.L"
-
-  Scenario: Run a fixed rate bulk flow and stop it
-    When I start a fixed rate bulk flow of 10 total orders at 5 orders per second
-    Then the bulk flow should be running
-    When I wait 3 seconds
-    And I stop the bulk order flow
-    Then the bulk flow should not be running
-    And the sent orders count should be at least 1
-
-  Scenario: Run a continuous fixed rate bulk flow
-    When I start a fixed rate bulk flow at 10 orders per second
-    Then the bulk flow should be running
-    When I wait 2 seconds
-    And I stop the bulk order flow
-    Then the bulk flow should not be running
-
-  Scenario: Run a burst bulk flow and stop it
-    When I start a burst bulk flow of 20 total orders with 5 per burst every 500 ms
-    Then the bulk flow should be running
-    When I wait 3 seconds
-    And I stop the bulk order flow
-    Then the bulk flow should not be running
-    And the sent orders count should be at least 1
-
-  Scenario: Run a continuous burst bulk flow
-    When I start a burst bulk flow with 10 orders per burst every 1000 ms
-    Then the bulk flow should be running
-    When I wait 2 seconds
-    And I stop the bulk order flow
-    Then the bulk flow should not be running
-
-  Scenario: Verify FIX tape captures messages after sending
-    When I send a New Order Single for 100 shares of "AAPL"
-    Then the FIX tape should contain at least 1 message
-
-  Scenario: Verify execution report count
-    When I send a New Order Single for 200 shares of "MSFT"
-    Then the execution report count should be at least 0
-
-  Scenario: Verify zero send failures
-    When I send a New Order Single for 100 shares of "AAPL"
-    Then the send failure count should be 0
-
-  Scenario: Verify reject count upper bound
-    When I send a New Order Single for 100 shares of "NVDA" at 875.00
-    Then the reject count should be at most 100
-
-  Scenario Outline: Bulk flow with different rates
-    When I start a fixed rate bulk flow of <total> total orders at <rate> orders per second
-    Then the bulk flow should be running
-    When I stop the bulk order flow
-    Then the bulk flow should not be running
-
-    Examples:
-      | total | rate |
-      | 5     | 2    |
-      | 20    | 10   |
-      | 50    | 25   |
-
-  Scenario Outline: Send orders for multiple symbols
-    When I send a New Order Single to buy <qty> shares of "<symbol>" at <price>
-    Then the sent orders count should be at least 1
-    And the order blotter should contain an order with symbol "<symbol>"
-
-    Examples:
-      | symbol | qty | price  |
-      | AAPL   | 100 | 170.00 |
-      | MSFT   | 200 | 415.00 |
-      | NVDA   | 50  | 875.00 |
-      | AMZN   | 75  | 200.00 |
-
-  Scenario Outline: Send orders with various order types
-    When I send a New Order Single to buy 100 shares of "AAPL" as <orderType> order
-    Then the sent orders count should be at least 1
-
-    Examples:
-      | orderType         |
-      | MARKET            |
-      | LIMIT             |
-      | MARKET_ON_CLOSE   |
-`
 
     const amendDraft = reactive({
       clOrdId: '',
@@ -3284,8 +3158,31 @@ createApp({
       }
     })
 
-    const loadCucumberSample = () => {
-      cucumberFeatureText.value = CUCUMBER_SAMPLE_FEATURE
+    const loadCucumberSample = async () => {
+      try {
+        const response = await fetch('/sample.feature')
+        if (response.ok) {
+          cucumberFeatureText.value = await response.text()
+        }
+      } catch (error) {
+        console.warn('Unable to load sample feature file', error)
+      }
+    }
+
+    const uploadFeatureFile = () => {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = '.feature,.txt'
+      input.onchange = (event) => {
+        const file = event.target.files?.[0]
+        if (!file) return
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          cucumberFeatureText.value = e.target?.result ?? ''
+        }
+        reader.readAsText(file)
+      }
+      input.click()
     }
 
     const runCucumberScenarios = async () => {
@@ -3512,6 +3409,7 @@ createApp({
       cucumberRunning,
       cucumberResult,
       loadCucumberSample,
+      uploadFeatureFile,
       runCucumberScenarios,
       cucumberScenarioStatusClass,
       cucumberStepStatusClass,

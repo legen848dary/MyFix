@@ -65,7 +65,7 @@ final class TheFixClientServer {
         router.post("/api/orders/cancel").handler(ctx -> writeJson(ctx.response(), workbenchState.cancelBlotterOrder(bodyJson(ctx))));
         router.post("/api/order-flow/start").handler(ctx -> writeJson(ctx.response(), workbenchState.startOrderFlow(bodyJson(ctx))));
         router.post("/api/order-flow/stop").handler(ctx -> writeJson(ctx.response(), workbenchState.stopOrderFlow(bodyJson(ctx))));
-        router.post("/api/cucumber/run").handler(ctx -> writeJson(ctx.response(), workbenchState.runCucumber(bodyJson(ctx))));
+        router.post("/api/cucumber/run").blockingHandler(ctx -> writeJson(ctx.response(), workbenchState.runCucumber(bodyJson(ctx))));
 
         router.get("/api/fix-messages").handler(ctx -> {
             int limit = Math.max(1, Math.min(parseIntParam(ctx.request().getParam("limit"), 20), 100));

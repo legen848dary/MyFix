@@ -47,7 +47,7 @@ class TheFixClientServerRoutingTest {
         server.start();
 
         HttpClient client = HttpClient.newHttpClient();
-        for (String path : List.of("/", "/home", "/neworder", "/order", "/orders", "/blotter", "/settings", "/session-profiles", "/about")) {
+        for (String path : List.of("/", "/home", "/neworder", "/order", "/orders", "/blotter", "/settings", "/session-profiles", "/about", "/cucumber")) {
             HttpResponse<String> response = send(client, path);
             assertEquals(200, response.statusCode(), "Unexpected status for " + path);
             assertTrue(response.headers().firstValue("content-type").orElse("").contains("text/html"), "Expected HTML for " + path);
@@ -79,7 +79,10 @@ class TheFixClientServerRoutingTest {
         assertTrue(appJsFromAsset.body().contains("runtimeSessions"));
         assertTrue(appJsFromAsset.body().contains("runtime-roster"));
         assertTrue(appJsFromAsset.body().contains("toggleRuntimeSession"));
-        assertTrue(appJsFromAsset.body().contains("syncFieldValuesToRawFixDraft"));
+        assertTrue(appJsFromAsset.body().contains("'scenario-runner': '/cucumber'"));
+        assertTrue(appJsFromAsset.body().contains("case '/cucumber':"));
+        assertTrue(appJsFromAsset.body().contains("runCucumberScenarios"));
+        assertTrue(appJsFromAsset.body().contains("uploadFeatureFile"));
         assertTrue(appJsFromAsset.body().contains("parseRawFixInputByDelimiter"));
         assertTrue(appJsFromAsset.body().contains("rawFixInputDraft"));
 
@@ -138,6 +141,19 @@ class TheFixClientServerRoutingTest {
         HttpResponse<String> aboutTrailingSlashRedirect = send(client, "/about/");
         assertEquals(308, aboutTrailingSlashRedirect.statusCode());
         assertEquals("/about", aboutTrailingSlashRedirect.headers().firstValue("location").orElse(""));
+
+        HttpResponse<String> cucumberTrailingSlashRedirect = send(client, "/cucumber/");
+        assertEquals(308, cucumberTrailingSlashRedirect.statusCode());
+        assertEquals("/cucumber", cucumberTrailingSlashRedirect.headers().firstValue("location").orElse(""));
+
+        HttpResponse<String> cucumberRun = post(client, "/api/cucumber/run", """
+                {"featureText":"Feature: Routing test\\n\\n  Scenario: Disconnected session verifies\\n    Given the FIX session is disconnected\\n    Then the session should not be connected"}
+                """);
+        assertEquals(200, cucumberRun.statusCode());
+        assertTrue(cucumberRun.headers().firstValue("content-type").orElse("").contains("application/json"));
+        assertTrue(cucumberRun.body().contains("\"status\""));
+        assertTrue(cucumberRun.body().contains("\"scenarios\""));
+        assertTrue(cucumberRun.body().contains("\"totalScenarios\""));
 
         HttpResponse<String> missingAsset = send(client, "/missing-does-not-exist.js");
         assertEquals(404, missingAsset.statusCode());

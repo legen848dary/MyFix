@@ -342,14 +342,20 @@ final class TheFixCucumberRunner {
                 (m, ctx, state) -> {
                     JsonObject result = state.connect(profileReq(ctx));
                     boolean connected = result.getJsonObject("session", new JsonObject()).getBoolean("connected", false);
-                    if (!connected) {
-                        String status = result.getJsonObject("session", new JsonObject()).getString("status", "unknown");
-                        if (status.toLowerCase(Locale.ROOT).contains("connect")) {
-                            return "Connect initiated — session is connecting (status: " + status + ")";
-                        }
-                        throw new StepException("Connect request sent but session is not yet connected (status: " + status + "). Ensure the FIX simulator is running.");
+                    if (connected) {
+                        return "FIX session connected successfully";
                     }
-                    return "FIX session connected successfully";
+                    // Poll up to 10 s for QuickFIX/J to establish the session
+                    for (int attempt = 0; attempt < 10; attempt++) {
+                        try { Thread.sleep(1000L); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+                        JsonObject snap = state.snapshot(ctx.profileName);
+                        connected = snap.getJsonObject("session", new JsonObject()).getBoolean("connected", false);
+                        if (connected) {
+                            return "FIX session connected after " + (attempt + 1) + " second(s)";
+                        }
+                    }
+                    String status = state.snapshot(ctx.profileName).getJsonObject("session", new JsonObject()).getString("status", "unknown");
+                    throw new StepException("Session not connected after 10 seconds (status: " + status + "). Ensure the FIX simulator is running.");
                 }));
 
         // "the FIX session for profile {string} is connected"
@@ -359,14 +365,20 @@ final class TheFixCucumberRunner {
                     ctx.profileName = m.group(1);
                     JsonObject result = state.connect(profileReq(ctx));
                     boolean connected = result.getJsonObject("session", new JsonObject()).getBoolean("connected", false);
-                    if (!connected) {
-                        String status = result.getJsonObject("session", new JsonObject()).getString("status", "unknown");
-                        if (status.toLowerCase(Locale.ROOT).contains("connect")) {
-                            return "Connect initiated for profile \"" + ctx.profileName + "\" (status: " + status + ")";
-                        }
-                        throw new StepException("Session for profile \"" + ctx.profileName + "\" is not connected (status: " + status + ")");
+                    if (connected) {
+                        return "FIX session for profile \"" + ctx.profileName + "\" connected successfully";
                     }
-                    return "FIX session for profile \"" + ctx.profileName + "\" connected successfully";
+                    // Poll up to 10 s for QuickFIX/J to establish the session
+                    for (int attempt = 0; attempt < 10; attempt++) {
+                        try { Thread.sleep(1000L); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+                        JsonObject snap = state.snapshot(ctx.profileName);
+                        connected = snap.getJsonObject("session", new JsonObject()).getBoolean("connected", false);
+                        if (connected) {
+                            return "FIX session for profile \"" + ctx.profileName + "\" connected after " + (attempt + 1) + " second(s)";
+                        }
+                    }
+                    String status = state.snapshot(ctx.profileName).getJsonObject("session", new JsonObject()).getString("status", "unknown");
+                    throw new StepException("Session for profile \"" + ctx.profileName + "\" not connected after 10 seconds (status: " + status + ")");
                 }));
 
         // "the FIX session is disconnected"
@@ -406,8 +418,8 @@ final class TheFixCucumberRunner {
                     String symbol = m.group(3);
                     double price = Double.parseDouble(m.group(4));
                     JsonObject req = nosRequest(ctx, symbol, side, qty, "LIMIT", price, 0d, "DAY");
-                    state.sendOrder(req);
-                    return "Sent LIMIT NOS: " + side + " " + qty + " " + symbol + " @ " + price;
+                    return captureSentOrder(state.sendOrder(req), ctx,
+                            "Sent LIMIT NOS: " + side + " " + qty + " " + symbol + " @ " + price);
                 }));
 
         // "I send a New Order Single for {int} shares of {string}"  (market)
@@ -417,8 +429,8 @@ final class TheFixCucumberRunner {
                     int qty = Integer.parseInt(m.group(1));
                     String symbol = m.group(2);
                     JsonObject req = nosRequest(ctx, symbol, "BUY", qty, "MARKET", 0d, 0d, "DAY");
-                    state.sendOrder(req);
-                    return "Sent MARKET NOS: BUY " + qty + " " + symbol;
+                    return captureSentOrder(state.sendOrder(req), ctx,
+                            "Sent MARKET NOS: BUY " + qty + " " + symbol);
                 }));
 
         // "I send a New Order Single to buy/sell {int} shares of {string} as MARKET/LIMIT/STOP/STOP_LIMIT order"
@@ -432,8 +444,8 @@ final class TheFixCucumberRunner {
                     double price = "LIMIT".equals(orderType) || "STOP_LIMIT".equals(orderType) || "LIMIT_ON_CLOSE".equals(orderType) ? 100.25 : 0d;
                     double stop = "STOP".equals(orderType) || "STOP_LIMIT".equals(orderType) ? 99.50 : 0d;
                     JsonObject req = nosRequest(ctx, symbol, side, qty, orderType, price, stop, "DAY");
-                    state.sendOrder(req);
-                    return "Sent " + orderType + " NOS: " + side + " " + qty + " " + symbol;
+                    return captureSentOrder(state.sendOrder(req), ctx,
+                            "Sent " + orderType + " NOS: " + side + " " + qty + " " + symbol);
                 }));
 
         // "I send a {string} New Order Single for {int} shares of {string} at {double} with TIF {string}"
@@ -446,8 +458,8 @@ final class TheFixCucumberRunner {
                     double price = Double.parseDouble(m.group(4));
                     String tif = m.group(5).toUpperCase(Locale.ROOT);
                     JsonObject req = nosRequest(ctx, symbol, side, qty, "LIMIT", price, 0d, tif);
-                    state.sendOrder(req);
-                    return "Sent LIMIT NOS: " + side + " " + qty + " " + symbol + " @ " + price + " TIF=" + tif;
+                    return captureSentOrder(state.sendOrder(req), ctx,
+                            "Sent LIMIT NOS: " + side + " " + qty + " " + symbol + " @ " + price + " TIF=" + tif);
                 }));
 
         // "I send a STOP order to {side} {int} shares of {string} at stop {double}"
@@ -459,8 +471,8 @@ final class TheFixCucumberRunner {
                     String symbol = m.group(3);
                     double stop = Double.parseDouble(m.group(4));
                     JsonObject req = nosRequest(ctx, symbol, side, qty, "STOP", 0d, stop, "DAY");
-                    state.sendOrder(req);
-                    return "Sent STOP NOS: " + side + " " + qty + " " + symbol + " stop @ " + stop;
+                    return captureSentOrder(state.sendOrder(req), ctx,
+                            "Sent STOP NOS: " + side + " " + qty + " " + symbol + " stop @ " + stop);
                 }));
 
         // "I send a STOP_LIMIT order to {side} {int} shares of {string} at limit {double} stop {double}"
@@ -473,8 +485,8 @@ final class TheFixCucumberRunner {
                     double price = Double.parseDouble(m.group(4));
                     double stop = Double.parseDouble(m.group(5));
                     JsonObject req = nosRequest(ctx, symbol, side, qty, "STOP_LIMIT", price, stop, "DAY");
-                    state.sendOrder(req);
-                    return "Sent STOP_LIMIT NOS: " + side + " " + qty + " " + symbol + " limit=" + price + " stop=" + stop;
+                    return captureSentOrder(state.sendOrder(req), ctx,
+                            "Sent STOP_LIMIT NOS: " + side + " " + qty + " " + symbol + " limit=" + price + " stop=" + stop);
                 }));
 
         // "I send a New Order Single for {int} shares of {string} on market {string}"
@@ -486,8 +498,8 @@ final class TheFixCucumberRunner {
                     String market = m.group(3).toUpperCase(Locale.ROOT);
                     JsonObject req = nosRequest(ctx, symbol, "BUY", qty, "LIMIT", 100.25, 0d, "DAY")
                             .put("market", market);
-                    state.sendOrder(req);
-                    return "Sent NOS for " + qty + " " + symbol + " on " + market;
+                    return captureSentOrder(state.sendOrder(req), ctx,
+                            "Sent NOS for " + qty + " " + symbol + " on " + market);
                 }));
 
         // ----------------------------------------------------------------
@@ -808,6 +820,17 @@ final class TheFixCucumberRunner {
         return new StepDefinition(
                 Pattern.compile(pattern, Pattern.CASE_INSENSITIVE),
                 action);
+    }
+
+    private static String captureSentOrder(JsonObject snapshot, RunContext ctx, String message) {
+        JsonArray recentOrders = snapshot.getJsonArray("recentOrders", new JsonArray());
+        if (!recentOrders.isEmpty()) {
+            String clOrdId = recentOrders.getJsonObject(0).getString("clOrdId", "");
+            if (clOrdId != null && !clOrdId.isBlank()) {
+                ctx.lastClOrdId = clOrdId;
+            }
+        }
+        return message;
     }
 
     private static JsonObject profileReq(RunContext ctx) {
