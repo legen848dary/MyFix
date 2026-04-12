@@ -2521,6 +2521,226 @@
     .modal-panel--wide {
       width: min(780px, 90vw);
     }
+
+    /* ------------------------------------------------------------------ */
+    /* Scenario Runner (Cucumber page)                                      */
+    /* ------------------------------------------------------------------ */
+
+    .cucumber-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 1100px) {
+      .cucumber-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .cucumber-editor-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      gap: 12px;
+    }
+
+    .cucumber-editor {
+      width: 100%;
+      min-height: 420px;
+      font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+      font-size: 12px;
+      line-height: 1.65;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg-input, var(--surface));
+      color: var(--text);
+      padding: 12px 14px;
+      resize: vertical;
+      box-sizing: border-box;
+    }
+
+    .cucumber-editor:focus {
+      outline: 2px solid var(--brand);
+      outline-offset: 2px;
+    }
+
+    .cucumber-step-reference {
+      margin-top: 0;
+    }
+
+    .cucumber-step-ref-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+      margin-top: 12px;
+    }
+
+    .cucumber-step-ref-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    .cucumber-step-ref-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .cucumber-step-ref-list li {
+      font-size: 11px;
+      color: var(--text-secondary, var(--text-muted));
+    }
+
+    .cucumber-step-ref-list .mono {
+      background: var(--surface-alt, rgba(255,255,255,0.06));
+      border-radius: 3px;
+      padding: 1px 4px;
+      font-size: 10.5px;
+    }
+
+    .cucumber-results-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .cucumber-error {
+      border: 1px solid var(--danger, #e74c3c);
+      border-radius: 6px;
+      padding: 10px 14px;
+      margin-bottom: 12px;
+      background: rgba(231, 76, 60, 0.08);
+    }
+
+    .cucumber-scenario {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+
+    .cucumber-scenario--passed {
+      border-color: var(--success, #2ecc71);
+    }
+
+    .cucumber-scenario--failed {
+      border-color: var(--danger, #e74c3c);
+    }
+
+    .cucumber-scenario--skipped {
+      border-color: var(--border);
+      opacity: 0.75;
+    }
+
+    .cucumber-scenario__header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: var(--surface-alt, rgba(255,255,255,0.04));
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+
+    .cucumber-scenario__keyword {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--brand);
+    }
+
+    .cucumber-scenario__name {
+      flex: 1;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .cucumber-steps {
+      list-style: none;
+      margin: 0;
+      padding: 8px 0;
+    }
+
+    .cucumber-step {
+      display: grid;
+      grid-template-columns: 18px 60px 1fr;
+      gap: 6px;
+      align-items: baseline;
+      padding: 4px 14px;
+      font-size: 12px;
+      border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.04));
+    }
+
+    .cucumber-step:last-child {
+      border-bottom: none;
+    }
+
+    .cucumber-step--passed {
+      background: rgba(46, 204, 113, 0.04);
+    }
+
+    .cucumber-step--failed {
+      background: rgba(231, 76, 60, 0.07);
+    }
+
+    .cucumber-step--skipped {
+      opacity: 0.55;
+    }
+
+    .cucumber-step__icon {
+      font-size: 11px;
+      text-align: center;
+    }
+
+    .cucumber-step--passed .cucumber-step__icon {
+      color: var(--success, #2ecc71);
+    }
+
+    .cucumber-step--failed .cucumber-step__icon {
+      color: var(--danger, #e74c3c);
+    }
+
+    .cucumber-step--skipped .cucumber-step__icon {
+      color: var(--text-muted);
+    }
+
+    .cucumber-step__keyword {
+      font-weight: 600;
+      color: var(--brand);
+      font-size: 11px;
+    }
+
+    .cucumber-step__text {
+      color: var(--text);
+    }
+
+    .cucumber-step__message {
+      grid-column: 2 / -1;
+      font-size: 11px;
+      color: var(--text-muted);
+      padding-left: 2px;
+      padding-top: 2px;
+      font-style: italic;
+    }
+
+    .cucumber-step--failed .cucumber-step__message {
+      color: var(--danger, #e74c3c);
+      font-style: normal;
+    }
   </style>
 </head>
 <body data-theme="dark">

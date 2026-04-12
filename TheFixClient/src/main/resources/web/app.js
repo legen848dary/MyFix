@@ -15,7 +15,8 @@ const REFRESH_FREQUENCY_OPTIONS = Object.freeze([1, 3, 5])
 const PAGE_OPTIONS = [
   { code: 'order-input', label: 'Create Order' },
   { code: 'order-blotter', label: 'My Orders' },
-  { code: 'fix-messages', label: 'Fix In/Out' }
+  { code: 'fix-messages', label: 'Fix In/Out' },
+  { code: 'scenario-runner', label: 'Scenario Runner' }
 ]
 
 const PAGE_PATHS = Object.freeze({
@@ -23,6 +24,7 @@ const PAGE_PATHS = Object.freeze({
   'order-blotter': '/orders',
   'fix-messages': '/recentfixmsgs',
   'session-profiles': '/session-profiles',
+  'scenario-runner': '/cucumber',
   about: '/about',
   settings: '/settings'
 })
@@ -89,6 +91,8 @@ function pageCodeFromPath(pathname) {
       return 'order-blotter'
     case '/recentfixmsgs':
       return 'fix-messages'
+    case '/cucumber':
+      return 'scenario-runner'
     case '/session-profiles':
     case '/sessionprofiles':
       return 'session-profiles'
@@ -1148,6 +1152,161 @@ createApp({
         </section>
       </main>
 
+      <main v-else-if="activePage === 'scenario-runner'" class="workspace workspace--single">
+        <section class="stack">
+          <article class="panel">
+            <div class="panel__header">
+              <div>
+                <h2 class="panel__title">Scenario Runner</h2>
+                <p class="panel__copy">Write or paste a Gherkin feature file, then click Run to execute scenarios automatically against the live FIX session. All order sending methods (single, fixed-rate bulk, burst bulk) and response verifications are supported.</p>
+              </div>
+              <span class="chip" :class="cucumberResult ? (cucumberResult.status === 'PASSED' ? 'chip--success' : 'chip--danger') : 'chip--neutral'">
+                {{ cucumberResult ? cucumberResult.status : 'Ready' }}
+              </span>
+            </div>
+            <div class="panel__body cucumber-layout">
+
+              <section class="stack">
+                <div class="compact-card">
+                  <div class="cucumber-editor-header">
+                    <p class="eyebrow">Feature file</p>
+                    <div class="button-row">
+                      <button class="button button--soft" @click="loadCucumberSample" :disabled="cucumberRunning">Load sample</button>
+                      <button class="button button--soft" @click="uploadFeatureFile" :disabled="cucumberRunning">Upload .feature</button>
+                      <button class="button button--primary" @click="runCucumberScenarios" :disabled="cucumberRunning || !cucumberFeatureText.trim()">
+                        {{ cucumberRunning ? 'Running…' : 'Run scenarios' }}
+                      </button>
+                    </div>
+                  </div>
+                  <textarea
+                    v-model="cucumberFeatureText"
+                    class="cucumber-editor"
+                    placeholder="Paste a Gherkin feature file here, click &#x27;Upload .feature&#x27; to load from disk, or click &#x27;Load sample&#x27; to see an example…"
+                    spellcheck="false"></textarea>
+                  <p class="compact-card__copy" style="margin-top: 10px;">
+                    Supported step keywords: <span class="mono">Given</span>, <span class="mono">When</span>, <span class="mono">Then</span>, <span class="mono">And</span>, <span class="mono">But</span>.
+                    Scenario Outlines with Examples tables are fully supported.
+                  </p>
+                </div>
+
+                <div class="compact-card cucumber-step-reference">
+                  <p class="eyebrow">Step reference</p>
+                  <div class="cucumber-step-ref-grid">
+                    <div class="cucumber-step-ref-group">
+                      <p class="cucumber-step-ref-title">Session</p>
+                      <ul class="cucumber-step-ref-list">
+                        <li><span class="mono">the FIX session is connected</span></li>
+                        <li><span class="mono">the FIX session for profile "name" is connected</span></li>
+                        <li><span class="mono">the FIX session is disconnected</span></li>
+                        <li><span class="mono">I wait N seconds</span></li>
+                      </ul>
+                    </div>
+                    <div class="cucumber-step-ref-group">
+                      <p class="cucumber-step-ref-title">Single Order</p>
+                      <ul class="cucumber-step-ref-list">
+                        <li><span class="mono">I send a New Order Single for N shares of "SYM"</span></li>
+                        <li><span class="mono">I send a New Order Single to buy/sell N shares of "SYM" at P</span></li>
+                        <li><span class="mono">I send a New Order Single to buy N shares of "SYM" as MARKET order</span></li>
+                        <li><span class="mono">I send a BUY New Order Single for N shares of "SYM" at P with TIF DAY</span></li>
+                        <li><span class="mono">I send a STOP order to buy N shares of "SYM" at stop P</span></li>
+                        <li><span class="mono">I send a STOP_LIMIT order to buy N shares of "SYM" at limit P stop S</span></li>
+                        <li><span class="mono">I send a New Order Single for N shares of "SYM" on market "MKT"</span></li>
+                      </ul>
+                    </div>
+                    <div class="cucumber-step-ref-group">
+                      <p class="cucumber-step-ref-title">Cancel / Amend</p>
+                      <ul class="cucumber-step-ref-list">
+                        <li><span class="mono">I cancel the order with ClOrdID "ID"</span></li>
+                        <li><span class="mono">I cancel the most recently sent order</span></li>
+                        <li><span class="mono">I amend the order with ClOrdID "ID" to quantity N and price P</span></li>
+                      </ul>
+                    </div>
+                    <div class="cucumber-step-ref-group">
+                      <p class="cucumber-step-ref-title">Bulk Flow</p>
+                      <ul class="cucumber-step-ref-list">
+                        <li><span class="mono">I start a fixed rate bulk flow at N orders per second</span></li>
+                        <li><span class="mono">I start a fixed rate bulk flow of N total orders at R orders per second</span></li>
+                        <li><span class="mono">I start a burst bulk flow with N orders per burst every M ms</span></li>
+                        <li><span class="mono">I start a burst bulk flow of N total orders with B per burst every M ms</span></li>
+                        <li><span class="mono">I stop the bulk order flow</span></li>
+                      </ul>
+                    </div>
+                    <div class="cucumber-step-ref-group">
+                      <p class="cucumber-step-ref-title">Verification</p>
+                      <ul class="cucumber-step-ref-list">
+                        <li><span class="mono">the session should be connected</span></li>
+                        <li><span class="mono">the session should not be connected</span></li>
+                        <li><span class="mono">the sent orders count should be at least N</span></li>
+                        <li><span class="mono">the sent orders count should be exactly N</span></li>
+                        <li><span class="mono">the execution report count should be at least N</span></li>
+                        <li><span class="mono">the order blotter should contain at least N orders</span></li>
+                        <li><span class="mono">the order blotter should contain an order with symbol "SYM"</span></li>
+                        <li><span class="mono">the order blotter should contain an order with status "STATUS"</span></li>
+                        <li><span class="mono">the FIX tape should contain at least N messages</span></li>
+                        <li><span class="mono">the cancel count should be at least N</span></li>
+                        <li><span class="mono">the reject count should be at most N</span></li>
+                        <li><span class="mono">the bulk flow should be running</span></li>
+                        <li><span class="mono">the bulk flow should not be running</span></li>
+                        <li><span class="mono">the send failure count should be N</span></li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="stack">
+                <div v-if="!cucumberResult && !cucumberRunning" class="compact-card">
+                  <p class="eyebrow">Results</p>
+                  <p class="compact-card__copy">Run scenarios to see results here.</p>
+                </div>
+
+                <div v-if="cucumberRunning" class="compact-card">
+                  <p class="eyebrow">Running…</p>
+                  <p class="compact-card__copy">Executing scenarios against the live FIX session. This may take a moment.</p>
+                </div>
+
+                <div v-if="cucumberResult && !cucumberRunning" class="compact-card">
+                  <div class="cucumber-results-header">
+                    <p class="eyebrow">{{ cucumberResult.featureName || 'Feature' }}</p>
+                    <div class="chip-row">
+                      <span class="chip" :class="cucumberResult.status === 'PASSED' ? 'chip--success' : 'chip--danger'">{{ cucumberResult.status }}</span>
+                      <span class="chip chip--neutral">{{ cucumberResult.totalScenarios }} scenarios</span>
+                      <span class="chip chip--success" v-if="cucumberResult.passed > 0">{{ cucumberResult.passed }} passed</span>
+                      <span class="chip chip--danger" v-if="cucumberResult.failed > 0">{{ cucumberResult.failed }} failed</span>
+                      <span class="chip chip--neutral" v-if="cucumberResult.skipped > 0">{{ cucumberResult.skipped }} skipped</span>
+                    </div>
+                  </div>
+
+                  <div v-if="cucumberResult.error" class="cucumber-error">
+                    <p class="eyebrow">Error</p>
+                    <p class="compact-card__copy">{{ cucumberResult.error }}</p>
+                  </div>
+
+                  <div v-for="scenario in (cucumberResult.scenarios || [])" :key="scenario.name"
+                       class="cucumber-scenario" :class="cucumberScenarioStatusClass(scenario.status)">
+                    <div class="cucumber-scenario__header">
+                      <span class="cucumber-scenario__keyword">Scenario</span>
+                      <span class="cucumber-scenario__name">{{ scenario.name }}</span>
+                      <span class="chip" :class="scenario.status === 'PASSED' ? 'chip--success' : scenario.status === 'SKIPPED' ? 'chip--neutral' : 'chip--danger'">{{ scenario.status }}</span>
+                    </div>
+                    <ul class="cucumber-steps">
+                      <li v-for="step in (scenario.steps || [])" :key="step.keyword + step.text"
+                          class="cucumber-step" :class="cucumberStepStatusClass(step.status)">
+                        <span class="cucumber-step__icon" aria-hidden="true">{{ cucumberStepIcon(step.status) }}</span>
+                        <span class="cucumber-step__keyword mono">{{ step.keyword }}</span>
+                        <span class="cucumber-step__text">{{ step.text }}</span>
+                        <span v-if="step.message" class="cucumber-step__message">{{ step.message }}</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </section>
+
+            </div>
+          </article>
+        </section>
+      </main>
+
       <main v-else class="workspace workspace--single">
         <section class="stack">
           <article class="panel">
@@ -1432,6 +1591,11 @@ createApp({
     const ordersStatusFilter = ref('')
     const ordersSourceFilter = ref('')
 
+    // --- Scenario runner state ---
+    const cucumberFeatureText = ref('')
+    const cucumberRunning = ref(false)
+    const cucumberResult = ref(null)
+
     const amendDraft = reactive({
       clOrdId: '',
       symbol: '',
@@ -1501,7 +1665,7 @@ createApp({
     })
     const refreshFrequencyLabel = (seconds) => `${seconds} second${seconds === 1 ? '' : 's'}`
     const currentRefreshFrequencyLabel = computed(() => refreshFrequencyLabel(activeRefreshSeconds.value))
-    const isSessionScopedPage = computed(() => ['order-input', 'order-blotter', 'fix-messages'].includes(activePage.value))
+    const isSessionScopedPage = computed(() => ['order-input', 'order-blotter', 'fix-messages', 'scenario-runner'].includes(activePage.value))
     const activeSessionProfileLabel = computed(() => session.profileName || sessionProfilesState.activeProfileName || 'Default profile')
     const selectedRuntimeSession = computed(() => (runtimeSessions.value || []).find(item => item.profileName === selectedProfileName.value) || null)
     const canResetSelectedSession = computed(() => Boolean(selectedRuntimeSession.value?.connected))
@@ -2994,6 +3158,80 @@ createApp({
       }
     })
 
+    const loadCucumberSample = async () => {
+      try {
+        const response = await fetch('/sample.feature')
+        if (response.ok) {
+          cucumberFeatureText.value = await response.text()
+        }
+      } catch (error) {
+        console.warn('Unable to load sample feature file', error)
+      }
+    }
+
+    const uploadFeatureFile = () => {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = '.feature,.txt'
+      input.onchange = (event) => {
+        const file = event.target.files?.[0]
+        if (!file) return
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          cucumberFeatureText.value = e.target?.result ?? ''
+        }
+        reader.readAsText(file)
+      }
+      input.click()
+    }
+
+    const runCucumberScenarios = async () => {
+      if (cucumberRunning.value) return
+      cucumberRunning.value = true
+      cucumberResult.value = null
+      try {
+        const data = await apiCall('/api/cucumber/run', {
+          method: 'POST',
+          body: JSON.stringify({
+            featureText: cucumberFeatureText.value || '',
+            profileName: selectedProfileName.value || ''
+          })
+        })
+        cucumberResult.value = data
+      } catch (error) {
+        cucumberResult.value = {
+          status: 'FAILED',
+          featureName: 'Error',
+          totalScenarios: 0,
+          passed: 0,
+          failed: 0,
+          skipped: 0,
+          scenarios: [],
+          error: error.message || 'Unable to reach the backend'
+        }
+      } finally {
+        cucumberRunning.value = false
+      }
+    }
+
+    const cucumberScenarioStatusClass = (status) => {
+      if (status === 'PASSED') return 'cucumber-scenario--passed'
+      if (status === 'SKIPPED') return 'cucumber-scenario--skipped'
+      return 'cucumber-scenario--failed'
+    }
+
+    const cucumberStepStatusClass = (status) => {
+      if (status === 'PASSED') return 'cucumber-step--passed'
+      if (status === 'SKIPPED') return 'cucumber-step--skipped'
+      return 'cucumber-step--failed'
+    }
+
+    const cucumberStepIcon = (status) => {
+      if (status === 'PASSED') return '✔'
+      if (status === 'SKIPPED') return '⊘'
+      return '✘'
+    }
+
     return {
       overview,
       session,
@@ -3166,7 +3404,16 @@ createApp({
       selectTheme,
       selectRefreshFrequency,
       refreshFrequencyLabel,
-      openPage
+      openPage,
+      cucumberFeatureText,
+      cucumberRunning,
+      cucumberResult,
+      loadCucumberSample,
+      uploadFeatureFile,
+      runCucumberScenarios,
+      cucumberScenarioStatusClass,
+      cucumberStepStatusClass,
+      cucumberStepIcon
     }
   }
 }).mount('#app')
