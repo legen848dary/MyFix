@@ -218,13 +218,18 @@ class TheFixClientLiveIntegrationTest {
         assertTrue(amendResponse.getJsonObject("actionResult").getBoolean("success"));
         assertTrue(waitFor(() -> {
             JsonObject order = state.snapshot().getJsonArray("recentOrders").getJsonObject(0);
+            String status = order.getString("status", "");
             return Integer.toString(120).equals(order.getValue("quantity").toString())
-                    && "101.25".equals(order.getString("limitPrice"));
-        }, Duration.ofSeconds(10)), "Expected the blotter order to reflect the amended quantity and price");
+                    && "101.25".equals(order.getString("limitPrice"))
+                    && !"Pending Amend".equals(status)
+                    && !"Pending".equals(status);
+        }, Duration.ofSeconds(10)), "Expected the blotter order to reflect the amended quantity and price with simulator confirmation");
 
         String amendedClOrdId = state.snapshot().getJsonArray("recentOrders").getJsonObject(0).getString("clOrdId");
         JsonObject cancelResponse = state.cancelBlotterOrder(new JsonObject().put("clOrdId", amendedClOrdId));
-        assertTrue(cancelResponse.getJsonObject("actionResult").getBoolean("success"));
+        assertTrue(cancelResponse.getJsonObject("actionResult").getBoolean("success"),
+                "Expected cancel of amended order " + amendedClOrdId + " to succeed. ActionResult: "
+                        + cancelResponse.getJsonObject("actionResult").encodePrettily());
         assertTrue(waitFor(() -> state.snapshot().getJsonObject("kpis").getLong("cancels") >= 1L, Duration.ofSeconds(10)),
                 "Expected successful cancel submissions to increment the cancels KPI");
         assertTrue(waitFor(() -> {

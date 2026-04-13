@@ -316,7 +316,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
             return false;
         }
         recentOrders.remove(priorClOrdId);
-        clOrdIdAliases.put(priorClOrdId, outboundClOrdId);
+        hiddenClOrdIds.add(priorClOrdId);
         orderView.applyAmendSubmission(outboundClOrdId, quantity, price);
         rememberOrder(orderView);
         persistOrders();

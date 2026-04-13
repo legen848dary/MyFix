@@ -259,7 +259,47 @@ const CUCUMBER_ALL_STEPS = Object.freeze(CUCUMBER_STEP_CATEGORIES.flatMap(cat =>
 
 createApp({
   template: `
-    <div class="shell">
+    <div v-if="!isAuthenticated" class="login-screen">
+      <div class="login-card">
+        <div class="login-logo">
+          <div class="login-logo__mark">TF</div>
+          <div>
+            <div class="login-logo__title">The FIX Client</div>
+            <div class="login-logo__sub">Trader Workstation</div>
+          </div>
+        </div>
+        <div class="login-divider"></div>
+        <div v-if="loginError" class="login-error">{{ loginError }}</div>
+        <label class="login-form__label">Username</label>
+        <input
+          class="login-form__input"
+          type="text"
+          placeholder="e.g. trader1"
+          v-model="loginUsername"
+          autocomplete="username"
+          @keydown.enter="doLogin"
+          :disabled="loginLoading"
+        />
+        <label class="login-form__label">Password</label>
+        <input
+          class="login-form__input"
+          type="password"
+          placeholder="Password"
+          v-model="loginPassword"
+          autocomplete="current-password"
+          @keydown.enter="doLogin"
+          :disabled="loginLoading"
+        />
+        <button class="login-btn" @click="doLogin" :disabled="loginLoading || !loginUsername || !loginPassword">
+          {{ loginLoading ? 'Signing in…' : 'Sign in' }}
+        </button>
+        <div class="login-hint">
+          <strong>Demo accounts</strong><br/>
+          admin / admin &nbsp;·&nbsp; trader1 / trader1 &nbsp;·&nbsp; trader2 / trader2 &nbsp;·&nbsp; trader3 / trader3
+        </div>
+      </div>
+    </div>
+    <div v-else class="shell">
       <nav class="desktop-menubar" aria-label="Desktop workstation menu">
         <div class="desktop-menubar__group">
           <div class="desktop-menu">
@@ -364,6 +404,10 @@ createApp({
           <div class="status-indicator" :class="session.autoFlowActive ? 'status-indicator--flow' : 'status-indicator--idle'">
             <span class="status-indicator__dot"></span>
             <span>{{ session.autoFlowActive ? session.autoFlowDescriptor : 'AUTO FLOW IDLE' }}</span>
+          </div>
+          <div class="login-topbar-user">
+            <span class="login-topbar-user__name">{{ currentUser.displayName || currentUser.username }}</span>
+            <button class="login-topbar-user__logout" @click="doLogout" title="Sign out">Sign out</button>
           </div>
         </div>
       </header>
@@ -1505,6 +1549,15 @@ createApp({
   `,
 
   setup() {
+    const AUTH_TOKEN_KEY = 'thefixclient-auth-token';
+    const isAuthenticated = ref(!!localStorage.getItem(AUTH_TOKEN_KEY));
+    const authToken = ref(localStorage.getItem(AUTH_TOKEN_KEY) || '');
+    const currentUser = reactive({ username: '', displayName: '', role: '' });
+    const loginUsername = ref('');
+    const loginPassword = ref('');
+    const loginError = ref('');
+    const loginLoading = ref(false);
+
     const overview = reactive({
       applicationName: 'TheFixClient'
     })
@@ -2022,10 +2075,18 @@ createApp({
     }
 
     const apiCall = async (url, options = {}) => {
-      const response = await fetch(url, {
-        headers: { 'Content-Type': 'application/json' },
-        ...options
-      })
+      const headers = { 'Content-Type': 'application/json' }
+      if (authToken.value) {
+        headers['Authorization'] = `Bearer ${authToken.value}`
+      }
+      const response = await fetch(url, { headers, ...options })
+      if (response.status === 401) {
+        authToken.value = ''
+        localStorage.removeItem(AUTH_TOKEN_KEY)
+        isAuthenticated.value = false
+        Object.assign(currentUser, { username: '', displayName: '', role: '' })
+        throw new Error('Session expired — please sign in again')
+      }
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`)
       }
@@ -3167,6 +3228,60 @@ createApp({
 
     watch(orderDraft, schedulePreview, { deep: true })
 
+    const loadWorkbench = async () => {
+      await loadFixMetadata()
+      await loadOverview()
+      await loadTemplates()
+      await previewTicket()
+      queueOverviewRefresh()
+    }
+
+    const doLogin = async () => {
+      if (!loginUsername.value || !loginPassword.value) return
+      loginLoading.value = true
+      loginError.value = ''
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: loginUsername.value, password: loginPassword.value })
+        })
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}))
+          loginError.value = body.message || 'Invalid username or password'
+          return
+        }
+        const body = await response.json()
+        authToken.value = body.token
+        localStorage.setItem(AUTH_TOKEN_KEY, body.token)
+        Object.assign(currentUser, { username: body.username, displayName: body.displayName || body.username, role: body.role || '' })
+        isAuthenticated.value = true
+        loginUsername.value = ''
+        loginPassword.value = ''
+        loginError.value = ''
+        syncPageFromLocation(true)
+        await loadWorkbench()
+      } catch (e) {
+        loginError.value = 'Login failed — check your network connection'
+      } finally {
+        loginLoading.value = false
+      }
+    }
+
+    const doLogout = async () => {
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken.value}` }
+        })
+      } catch (_) { /* ignore */ }
+      authToken.value = ''
+      localStorage.removeItem(AUTH_TOKEN_KEY)
+      isAuthenticated.value = false
+      Object.assign(currentUser, { username: '', displayName: '', role: '' })
+      clearOverviewRefresh()
+    }
+
     onMounted(async () => {
       if (themeMediaQuery?.addEventListener) {
         themeMediaQuery.addEventListener('change', handleSystemThemeChange)
@@ -3175,12 +3290,26 @@ createApp({
       }
       window.addEventListener('popstate', handlePopState)
       window.addEventListener('click', closeMenu)
-      syncPageFromLocation(true)
-      await loadFixMetadata()
-      await loadOverview()
-      await loadTemplates()
-      await previewTicket()
-      queueOverviewRefresh()
+      if (authToken.value) {
+        try {
+          const me = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${authToken.value}` } })
+          if (me.ok) {
+            const body = await me.json()
+            Object.assign(currentUser, { username: body.username, displayName: body.displayName || body.username, role: body.role || '' })
+            isAuthenticated.value = true
+            syncPageFromLocation(true)
+            await loadWorkbench()
+          } else {
+            authToken.value = ''
+            localStorage.removeItem(AUTH_TOKEN_KEY)
+            isAuthenticated.value = false
+          }
+        } catch (_) {
+          authToken.value = ''
+          localStorage.removeItem(AUTH_TOKEN_KEY)
+          isAuthenticated.value = false
+        }
+      }
     })
 
     onUnmounted(() => {
@@ -3373,6 +3502,8 @@ createApp({
     const onCucumberBlur = () => { setTimeout(_dismissAc, 150) }
 
     return {
+      isAuthenticated, currentUser, loginUsername, loginPassword, loginError, loginLoading,
+      doLogin, doLogout,
       overview,
       session,
       kpis,

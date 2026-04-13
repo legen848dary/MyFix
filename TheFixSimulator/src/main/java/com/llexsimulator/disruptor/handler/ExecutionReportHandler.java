@@ -214,7 +214,9 @@ public final class ExecutionReportHandler implements EventHandler<OrderEvent> {
         if (state != null) {
             state.setCumQty(cumQty);
             state.setLeavesQty(leavesQty);
-            if (filled || terminalAction) orderRepository.release(corrId);
+            // Only release when fully filled. Partial fills keep the order state active
+            // so the client can still submit OCRR (amend) or Cancel.
+            if (filled) orderRepository.release(corrId);
         }
     }
 
