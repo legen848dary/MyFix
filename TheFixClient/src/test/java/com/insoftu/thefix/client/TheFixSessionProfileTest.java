@@ -15,7 +15,7 @@ class TheFixSessionProfileTest {
                 "0.0.0.0", 8081, "localhost", 9880,
                 "FIX.4.4", "THEFIX_TRDR01", "LLEXSIM",
                 "FIX.4.4", 30, 5, 25,
-                "build/test-quickfixj", false);
+                "build/test-quickfixj", false, 480, 1);
     }
 
     // -----------------------------------------------------------------------

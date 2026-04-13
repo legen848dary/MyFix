@@ -23,7 +23,9 @@ class TheFixClientApplicationTest {
                         5,
                         25,
                         "logs/thefixclient/test-quickfixj",
-                        false
+                        false,
+                        480,
+                        1
                 ))
         );
     }

@@ -264,7 +264,9 @@ class TheFixClientLiveIntegrationTest {
                         2,
                         10,
                         "build/test-live-quickfixj",
-                        false
+                        false,
+                        480,
+                        1
                 );
                 TheFixSessionProfileStore store = new TheFixSessionProfileStore(config);
                 store.updateStoragePath(tempDir.resolve("profiles").toString());

@@ -79,22 +79,28 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
     private final TheFixClientConfig config;
     private final TheFixSessionProfileStore profileStore;
     private final TheFixMessageTemplateStore templateStore;
+    private final TheFixOrderStore orderStore;
     private final LinkedHashMap<String, TheFixClientFixService> fixServices = new LinkedHashMap<>();
 
     private int pulseChecks;
 
     TheFixClientWorkbenchState(TheFixClientConfig config) {
-        this(config, new TheFixSessionProfileStore(config), new TheFixMessageTemplateStore(config));
+        this(config, new TheFixSessionProfileStore(config), new TheFixMessageTemplateStore(config), new TheFixOrderStore(config));
     }
 
     TheFixClientWorkbenchState(TheFixClientConfig config, TheFixSessionProfileStore profileStore) {
-        this(config, profileStore, new TheFixMessageTemplateStore(config));
+        this(config, profileStore, new TheFixMessageTemplateStore(config), new TheFixOrderStore(config));
     }
 
     TheFixClientWorkbenchState(TheFixClientConfig config, TheFixSessionProfileStore profileStore, TheFixMessageTemplateStore templateStore) {
+        this(config, profileStore, templateStore, new TheFixOrderStore(config));
+    }
+
+    TheFixClientWorkbenchState(TheFixClientConfig config, TheFixSessionProfileStore profileStore, TheFixMessageTemplateStore templateStore, TheFixOrderStore orderStore) {
         this.config = config;
         this.profileStore = profileStore;
         this.templateStore = templateStore;
+        this.orderStore = orderStore;
     }
 
     synchronized JsonObject snapshot() {
@@ -398,7 +404,11 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
 
     private TheFixClientFixService serviceForProfile(String profileName) {
         TheFixSessionProfile profile = profileForName(profileName);
-        return fixServices.computeIfAbsent(profile.name(), ignored -> new TheFixClientFixService(config, profile));
+        return fixServices.computeIfAbsent(profile.name(), ignored -> {
+            TheFixClientFixService service = new TheFixClientFixService(config, profile, orderStore);
+            service.loadPersistedOrders(orderStore.load(config.senderCompId(), profile.name()));
+            return service;
+        });
     }
 
     private JsonObject rejectOrResolveSessionIdentityConflict(TheFixSessionProfile selectedProfile, String actionType) {

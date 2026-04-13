@@ -357,7 +357,9 @@ class TheFixClientWorkbenchStateTest {
                 5,
                 25,
                 "build/test-quickfixj",
-                false
+                false,
+                480,
+                1
         );
     }
 

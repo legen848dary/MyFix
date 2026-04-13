@@ -6,29 +6,33 @@ import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.HttpServerOptions;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
+import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.BodyHandler;
 import io.vertx.ext.web.handler.StaticHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 final class TheFixClientServer {
     private static final Logger log = LoggerFactory.getLogger(TheFixClientServer.class);
+    static final String AUTH_TOKEN_HEADER = "X-Auth-Token";
+    static final String AUTH_TOKEN_COOKIE = "thefix-token";
 
     private final TheFixClientConfig config;
-    private final TheFixClientWorkbenchState workbenchState;
+    private final UserSessionRegistry sessionRegistry;
     private final Vertx vertx;
 
     private HttpServer httpServer;
 
     TheFixClientServer(TheFixClientConfig config) {
-        this(config, new TheFixClientWorkbenchState(config));
+        this(config, new UserSessionRegistry(config, new DemoAuthModule()));
     }
 
-    TheFixClientServer(TheFixClientConfig config, TheFixClientWorkbenchState workbenchState) {
+    TheFixClientServer(TheFixClientConfig config, UserSessionRegistry sessionRegistry) {
         this.config = config;
-        this.workbenchState = workbenchState;
+        this.sessionRegistry = sessionRegistry;
         this.vertx = Vertx.vertx(new VertxOptions().setPreferNativeTransport(true));
     }
 
@@ -36,41 +40,101 @@ final class TheFixClientServer {
         Router router = Router.router(vertx);
         router.route("/api/*").handler(BodyHandler.create());
 
+        // ── Public endpoints (no auth required) ──────────────────────────────
         router.get("/api/health").handler(ctx -> writeJson(ctx.response(), new JsonObject()
                 .put("status", "UP")
                 .put("application", "TheFixClient")
                 .put("mode", "live-fix-workstation")
                 .put("port", config.port())));
 
-        router.get("/api/overview").handler(ctx -> writeJson(ctx.response(), workbenchState.snapshot(ctx.request().getParam("profileName"))));
-        router.get("/api/fix-metadata").handler(ctx -> writeJson(ctx.response(), workbenchState.fixMetadataSnapshot()));
-        router.get("/api/settings").handler(ctx -> writeJson(ctx.response(), workbenchState.settingsSnapshot()));
-        router.get("/api/session-profiles").handler(ctx -> writeJson(ctx.response(), workbenchState.sessionProfilesSnapshot()));
-        router.get("/api/templates").handler(ctx -> writeJson(ctx.response(), workbenchState.templateSnapshot(ctx.request().getParam("profileName"))));
-        router.post("/api/session/connect").handler(ctx -> writeJson(ctx.response(), workbenchState.connect(bodyJson(ctx))));
-        router.post("/api/session/disconnect").handler(ctx -> writeJson(ctx.response(), workbenchState.disconnect(bodyJson(ctx))));
-        router.post("/api/session/pulse-test").handler(ctx -> writeJson(ctx.response(), workbenchState.pulseTest(bodyJson(ctx))));
-        router.post("/api/session/reset-sequence").handler(ctx -> writeJson(ctx.response(), workbenchState.resetSequenceNumbers(bodyJson(ctx))));
-        router.post("/api/settings/profiles/save").handler(ctx -> writeJson(ctx.response(), workbenchState.saveSettingsProfile(bodyJson(ctx))));
-        router.post("/api/settings/profiles/activate").handler(ctx -> writeJson(ctx.response(), workbenchState.activateSettingsProfile(bodyJson(ctx))));
-        router.post("/api/settings/profiles/delete").handler(ctx -> writeJson(ctx.response(), workbenchState.deleteSettingsProfile(bodyJson(ctx))));
-        router.post("/api/session-profiles/save").handler(ctx -> writeJson(ctx.response(), workbenchState.saveSettingsProfile(bodyJson(ctx))));
-        router.post("/api/session-profiles/activate").handler(ctx -> writeJson(ctx.response(), workbenchState.activateSettingsProfile(bodyJson(ctx))));
-        router.post("/api/session-profiles/delete").handler(ctx -> writeJson(ctx.response(), workbenchState.deleteSettingsProfile(bodyJson(ctx))));
-        router.post("/api/settings/storage-path").handler(ctx -> writeJson(ctx.response(), workbenchState.updateSettingsStoragePath(bodyJson(ctx))));
-        router.post("/api/templates/save").handler(ctx -> writeJson(ctx.response(), workbenchState.saveMessageTemplate(bodyJson(ctx))));
-        router.post("/api/order-ticket/preview").handler(ctx -> writeJson(ctx.response(), workbenchState.previewOrder(bodyJson(ctx))));
-        router.post("/api/order-ticket/send").handler(ctx -> writeJson(ctx.response(), workbenchState.sendOrder(bodyJson(ctx))));
-        router.post("/api/orders/amend").handler(ctx -> writeJson(ctx.response(), workbenchState.amendBlotterOrder(bodyJson(ctx))));
-        router.post("/api/orders/cancel").handler(ctx -> writeJson(ctx.response(), workbenchState.cancelBlotterOrder(bodyJson(ctx))));
-        router.post("/api/order-flow/start").handler(ctx -> writeJson(ctx.response(), workbenchState.startOrderFlow(bodyJson(ctx))));
-        router.post("/api/order-flow/stop").handler(ctx -> writeJson(ctx.response(), workbenchState.stopOrderFlow(bodyJson(ctx))));
-        router.post("/api/cucumber/run").blockingHandler(ctx -> writeJson(ctx.response(), workbenchState.runCucumber(bodyJson(ctx))));
+        router.post("/api/auth/login").handler(ctx -> {
+            JsonObject body = bodyJson(ctx);
+            String username = body == null ? null : body.getString("username");
+            String password = body == null ? null : body.getString("password");
+            Optional<UserSession> session = sessionRegistry.login(username, password);
+            if (session.isEmpty()) {
+                ctx.response().setStatusCode(401)
+                        .putHeader("content-type", "application/json")
+                        .end(new JsonObject().put("error", "Invalid credentials").encode());
+                return;
+            }
+            UserSession s = session.get();
+            writeJson(ctx.response(), new JsonObject()
+                    .put("token", s.token())
+                    .put("username", s.user().username())
+                    .put("displayName", s.user().displayName())
+                    .put("role", s.user().role())
+                    .put("expiresAt", s.expiresAt().toString())
+                    .put("authModule", config.sessionTimeoutMinutes()));
+        });
+
+        // ── Auth middleware: applied to all /api/* except the two above ───────
+        router.route("/api/*").handler(ctx -> {
+            String path = ctx.request().path();
+            if (path.equals("/api/health") || path.equals("/api/auth/login")) {
+                ctx.next();
+                return;
+            }
+            Optional<UserSession> session = resolveSession(ctx);
+            if (session.isEmpty()) {
+                ctx.response().setStatusCode(401)
+                        .putHeader("content-type", "application/json")
+                        .end(new JsonObject().put("error", "Authentication required").encode());
+                return;
+            }
+            ctx.put("userSession", session.get());
+            ctx.next();
+        });
+
+        // ── Authenticated auth endpoints ──────────────────────────────────────
+        router.post("/api/auth/logout").handler(ctx -> {
+            String token = resolveToken(ctx);
+            sessionRegistry.logout(token);
+            writeJson(ctx.response(), new JsonObject().put("loggedOut", true));
+        });
+
+        router.get("/api/auth/me").handler(ctx -> {
+            UserSession s = ctx.get("userSession");
+            writeJson(ctx.response(), new JsonObject()
+                    .put("username", s.user().username())
+                    .put("displayName", s.user().displayName())
+                    .put("role", s.user().role())
+                    .put("expiresAt", s.expiresAt().toString()));
+        });
+
+        // ── Authenticated workbench API ───────────────────────────────────────
+        router.get("/api/overview").handler(ctx -> {
+            TheFixClientWorkbenchState ws = workbench(ctx);
+            writeJson(ctx.response(), ws.snapshot(ctx.request().getParam("profileName")));
+        });
+        router.get("/api/fix-metadata").handler(ctx -> writeJson(ctx.response(), workbench(ctx).fixMetadataSnapshot()));
+        router.get("/api/settings").handler(ctx -> writeJson(ctx.response(), workbench(ctx).settingsSnapshot()));
+        router.get("/api/session-profiles").handler(ctx -> writeJson(ctx.response(), workbench(ctx).sessionProfilesSnapshot()));
+        router.get("/api/templates").handler(ctx -> writeJson(ctx.response(), workbench(ctx).templateSnapshot(ctx.request().getParam("profileName"))));
+        router.post("/api/session/connect").handler(ctx -> writeJson(ctx.response(), workbench(ctx).connect(bodyJson(ctx))));
+        router.post("/api/session/disconnect").handler(ctx -> writeJson(ctx.response(), workbench(ctx).disconnect(bodyJson(ctx))));
+        router.post("/api/session/pulse-test").handler(ctx -> writeJson(ctx.response(), workbench(ctx).pulseTest(bodyJson(ctx))));
+        router.post("/api/session/reset-sequence").handler(ctx -> writeJson(ctx.response(), workbench(ctx).resetSequenceNumbers(bodyJson(ctx))));
+        router.post("/api/settings/profiles/save").handler(ctx -> writeJson(ctx.response(), workbench(ctx).saveSettingsProfile(bodyJson(ctx))));
+        router.post("/api/settings/profiles/activate").handler(ctx -> writeJson(ctx.response(), workbench(ctx).activateSettingsProfile(bodyJson(ctx))));
+        router.post("/api/settings/profiles/delete").handler(ctx -> writeJson(ctx.response(), workbench(ctx).deleteSettingsProfile(bodyJson(ctx))));
+        router.post("/api/session-profiles/save").handler(ctx -> writeJson(ctx.response(), workbench(ctx).saveSettingsProfile(bodyJson(ctx))));
+        router.post("/api/session-profiles/activate").handler(ctx -> writeJson(ctx.response(), workbench(ctx).activateSettingsProfile(bodyJson(ctx))));
+        router.post("/api/session-profiles/delete").handler(ctx -> writeJson(ctx.response(), workbench(ctx).deleteSettingsProfile(bodyJson(ctx))));
+        router.post("/api/settings/storage-path").handler(ctx -> writeJson(ctx.response(), workbench(ctx).updateSettingsStoragePath(bodyJson(ctx))));
+        router.post("/api/templates/save").handler(ctx -> writeJson(ctx.response(), workbench(ctx).saveMessageTemplate(bodyJson(ctx))));
+        router.post("/api/order-ticket/preview").handler(ctx -> writeJson(ctx.response(), workbench(ctx).previewOrder(bodyJson(ctx))));
+        router.post("/api/order-ticket/send").handler(ctx -> writeJson(ctx.response(), workbench(ctx).sendOrder(bodyJson(ctx))));
+        router.post("/api/orders/amend").handler(ctx -> writeJson(ctx.response(), workbench(ctx).amendBlotterOrder(bodyJson(ctx))));
+        router.post("/api/orders/cancel").handler(ctx -> writeJson(ctx.response(), workbench(ctx).cancelBlotterOrder(bodyJson(ctx))));
+        router.post("/api/order-flow/start").handler(ctx -> writeJson(ctx.response(), workbench(ctx).startOrderFlow(bodyJson(ctx))));
+        router.post("/api/order-flow/stop").handler(ctx -> writeJson(ctx.response(), workbench(ctx).stopOrderFlow(bodyJson(ctx))));
+        router.post("/api/cucumber/run").blockingHandler(ctx -> writeJson(ctx.response(), workbench(ctx).runCucumber(bodyJson(ctx))));
 
         router.get("/api/fix-messages").handler(ctx -> {
             int limit = Math.max(1, Math.min(parseIntParam(ctx.request().getParam("limit"), 20), 100));
             int offset = Math.max(0, parseIntParam(ctx.request().getParam("offset"), 0));
-            writeJson(ctx.response(), workbenchState.recentFixMessages(limit, offset, ctx.request().getParam("profileName")));
+            writeJson(ctx.response(), workbench(ctx).recentFixMessages(limit, offset, ctx.request().getParam("profileName")));
         });
 
         router.getWithRegex("^/(home|neworder|order|orders|blotter|settings|session-profiles|sessionprofiles|recentfixmsgs|cucumber|about)$").handler(ctx -> ctx.reroute("/index.html"));
@@ -104,9 +168,9 @@ final class TheFixClientServer {
 
     public void stop() {
         try {
-            workbenchState.close();
+            sessionRegistry.close();
         } catch (Exception exception) {
-            log.warn("Error while stopping TheFixClient FIX state", exception);
+            log.warn("Error while stopping TheFixClient session registry", exception);
         }
 
         try {
@@ -129,12 +193,32 @@ final class TheFixClientServer {
         return httpServer == null ? config.port() : httpServer.actualPort();
     }
 
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    private static TheFixClientWorkbenchState workbench(RoutingContext ctx) {
+        UserSession session = ctx.get("userSession");
+        return session.workbenchState();
+    }
+
+    private Optional<UserSession> resolveSession(RoutingContext ctx) {
+        return sessionRegistry.validate(resolveToken(ctx));
+    }
+
+    private static String resolveToken(RoutingContext ctx) {
+        String headerToken = ctx.request().getHeader(AUTH_TOKEN_HEADER);
+        if (headerToken != null && !headerToken.isBlank()) {
+            return headerToken.trim();
+        }
+        io.vertx.core.http.Cookie cookie = ctx.request().getCookie(AUTH_TOKEN_COOKIE);
+        return cookie == null ? null : cookie.getValue();
+    }
+
     private static void writeJson(io.vertx.core.http.HttpServerResponse response, JsonObject payload) {
         response.putHeader("content-type", "application/json")
                 .end(payload.encode());
     }
 
-    private static JsonObject bodyJson(io.vertx.ext.web.RoutingContext context) {
+    private static JsonObject bodyJson(RoutingContext context) {
         return context.body() == null ? new JsonObject() : context.body().asJsonObject();
     }
 

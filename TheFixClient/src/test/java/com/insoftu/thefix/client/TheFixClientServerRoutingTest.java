@@ -1,5 +1,6 @@
 package com.insoftu.thefix.client;
 
+import io.vertx.core.json.JsonObject;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -42,13 +43,22 @@ class TheFixClientServerRoutingTest {
                 5,
                 25,
                 logDir.toString(),
-                false
+                false,
+                480,
+                1
         ));
         server.start();
 
         HttpClient client = HttpClient.newHttpClient();
+
+        // Obtain a demo auth token before calling protected API endpoints.
+        HttpResponse<String> loginResponse = post(client, "/api/auth/login",
+                "{\"username\":\"trader1\",\"password\":\"trader1\"}", null);
+        assertEquals(200, loginResponse.statusCode());
+        String token = new JsonObject(loginResponse.body()).getString("token");
+
         for (String path : List.of("/", "/home", "/neworder", "/order", "/orders", "/blotter", "/settings", "/session-profiles", "/about", "/cucumber")) {
-            HttpResponse<String> response = send(client, path);
+            HttpResponse<String> response = send(client, path, null);
             assertEquals(200, response.statusCode(), "Unexpected status for " + path);
             assertTrue(response.headers().firstValue("content-type").orElse("").contains("text/html"), "Expected HTML for " + path);
             assertTrue(response.body().contains("<div id=\"app\"></div>"), "Expected SPA shell for " + path);
@@ -58,7 +68,7 @@ class TheFixClientServerRoutingTest {
             assertTrue(response.body().contains("z-index: 70;"), "Expected elevated menu dropdown layering in shell for " + path);
         }
 
-        HttpResponse<String> appJsFromAsset = send(client, "/app.js");
+        HttpResponse<String> appJsFromAsset = send(client, "/app.js", null);
         assertEquals(200, appJsFromAsset.statusCode());
         assertTrue(appJsFromAsset.body().contains("'order-input': '/home'"));
         assertTrue(appJsFromAsset.body().contains("'session-profiles': '/session-profiles'"));
@@ -86,94 +96,102 @@ class TheFixClientServerRoutingTest {
         assertTrue(appJsFromAsset.body().contains("parseRawFixInputByDelimiter"));
         assertTrue(appJsFromAsset.body().contains("rawFixInputDraft"));
 
-        HttpResponse<String> apiHealth = send(client, "/api/health");
+        HttpResponse<String> apiHealth = send(client, "/api/health", null);
         assertEquals(200, apiHealth.statusCode());
         assertTrue(apiHealth.headers().firstValue("content-type").orElse("").contains("application/json"));
         assertTrue(apiHealth.body().contains("\"status\":\"UP\""));
 
-        HttpResponse<String> templates = send(client, "/api/templates");
+        // Unauthenticated request must return 401.
+        HttpResponse<String> unauthenticated = send(client, "/api/templates", null);
+        assertEquals(401, unauthenticated.statusCode());
+
+        HttpResponse<String> templates = send(client, "/api/templates", token);
         assertEquals(200, templates.statusCode());
         assertTrue(templates.body().contains("\"templates\""));
 
         HttpResponse<String> saveTemplate = post(client, "/api/templates/save", """
                 {"name":"Routing test template","draft":{"messageType":"NEW_ORDER_SINGLE","symbol":"AAPL","side":"BUY","quantity":10,"price":100.25}}
-                """);
+                """, token);
         assertEquals(200, saveTemplate.statusCode());
         assertTrue(saveTemplate.body().contains("Routing test template"));
 
         HttpResponse<String> amendOrder = post(client, "/api/orders/amend", """
                 {"clOrdId":"UNKNOWN","quantity":25,"price":101.10}
-                """);
+                """, token);
         assertEquals(200, amendOrder.statusCode());
         assertTrue(amendOrder.body().contains("\"actionResult\""));
 
         HttpResponse<String> cancelOrder = post(client, "/api/orders/cancel", """
                 {"clOrdId":"UNKNOWN"}
-                """);
+                """, token);
         assertEquals(200, cancelOrder.statusCode());
         assertTrue(cancelOrder.body().contains("\"actionResult\""));
 
         HttpResponse<String> deleteProfile = post(client, "/api/session-profiles/delete", """
                 {"name":"Default profile"}
-                """);
+                """, token);
         assertEquals(200, deleteProfile.statusCode());
         assertTrue(deleteProfile.body().contains("\"actionResult\""));
         assertTrue(deleteProfile.body().contains("delete-profile"));
 
         assertTrue(appJsFromAsset.body().contains("createApp({"));
 
-        HttpResponse<String> trailingSlashRedirect = send(client, "/blotter/");
+        HttpResponse<String> trailingSlashRedirect = send(client, "/blotter/", null);
         assertEquals(308, trailingSlashRedirect.statusCode());
         assertEquals("/blotter", trailingSlashRedirect.headers().firstValue("location").orElse(""));
 
-        HttpResponse<String> ordersTrailingSlashRedirect = send(client, "/orders/");
+        HttpResponse<String> ordersTrailingSlashRedirect = send(client, "/orders/", null);
         assertEquals(308, ordersTrailingSlashRedirect.statusCode());
         assertEquals("/orders", ordersTrailingSlashRedirect.headers().firstValue("location").orElse(""));
 
-        HttpResponse<String> newOrderTrailingSlashRedirect = send(client, "/neworder/");
+        HttpResponse<String> newOrderTrailingSlashRedirect = send(client, "/neworder/", null);
         assertEquals(308, newOrderTrailingSlashRedirect.statusCode());
         assertEquals("/neworder", newOrderTrailingSlashRedirect.headers().firstValue("location").orElse(""));
 
-        HttpResponse<String> sessionProfilesTrailingSlashRedirect = send(client, "/session-profiles/");
+        HttpResponse<String> sessionProfilesTrailingSlashRedirect = send(client, "/session-profiles/", null);
         assertEquals(308, sessionProfilesTrailingSlashRedirect.statusCode());
         assertEquals("/session-profiles", sessionProfilesTrailingSlashRedirect.headers().firstValue("location").orElse(""));
 
-        HttpResponse<String> aboutTrailingSlashRedirect = send(client, "/about/");
+        HttpResponse<String> aboutTrailingSlashRedirect = send(client, "/about/", null);
         assertEquals(308, aboutTrailingSlashRedirect.statusCode());
         assertEquals("/about", aboutTrailingSlashRedirect.headers().firstValue("location").orElse(""));
 
-        HttpResponse<String> cucumberTrailingSlashRedirect = send(client, "/cucumber/");
+        HttpResponse<String> cucumberTrailingSlashRedirect = send(client, "/cucumber/", null);
         assertEquals(308, cucumberTrailingSlashRedirect.statusCode());
         assertEquals("/cucumber", cucumberTrailingSlashRedirect.headers().firstValue("location").orElse(""));
 
         HttpResponse<String> cucumberRun = post(client, "/api/cucumber/run", """
                 {"featureText":"Feature: Routing test\\n\\n  Scenario: Disconnected session verifies\\n    Given the FIX session is disconnected\\n    Then the session should not be connected"}
-                """);
+                """, token);
         assertEquals(200, cucumberRun.statusCode());
         assertTrue(cucumberRun.headers().firstValue("content-type").orElse("").contains("application/json"));
         assertTrue(cucumberRun.body().contains("\"status\""));
         assertTrue(cucumberRun.body().contains("\"scenarios\""));
         assertTrue(cucumberRun.body().contains("\"totalScenarios\""));
 
-        HttpResponse<String> missingAsset = send(client, "/missing-does-not-exist.js");
+        HttpResponse<String> missingAsset = send(client, "/missing-does-not-exist.js", null);
         assertEquals(404, missingAsset.statusCode());
     }
 
-    private HttpResponse<String> send(HttpClient client, String path) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder()
+    private HttpResponse<String> send(HttpClient client, String path, String token) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create("http://127.0.0.1:" + server.actualPort() + path))
-                .GET()
-                .build();
-        return client.send(request, HttpResponse.BodyHandlers.ofString());
+                .GET();
+        if (token != null) {
+            builder.header(TheFixClientServer.AUTH_TOKEN_HEADER, token);
+        }
+        return client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
     }
 
-    private HttpResponse<String> post(HttpClient client, String path, String payload) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder()
+    private HttpResponse<String> post(HttpClient client, String path, String payload, String token) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create("http://127.0.0.1:" + server.actualPort() + path))
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
-                .build();
-        return client.send(request, HttpResponse.BodyHandlers.ofString());
+                .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8));
+        if (token != null) {
+            builder.header(TheFixClientServer.AUTH_TOKEN_HEADER, token);
+        }
+        return client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
     }
 }
 

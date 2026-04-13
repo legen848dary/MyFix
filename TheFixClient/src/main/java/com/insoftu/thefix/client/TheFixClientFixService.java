@@ -92,6 +92,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
 
     private final TheFixClientConfig config;
     private final TheFixSessionProfile runtimeProfile;
+    private final TheFixOrderStore orderStore;
     private final AtomicReference<SessionID> activeSessionId = new AtomicReference<>();
     private final AtomicLong sequence = new AtomicLong();
     private final AtomicLong sentCount = new AtomicLong();
@@ -124,8 +125,13 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     private long autoFlowRemaining;
 
     TheFixClientFixService(TheFixClientConfig config, TheFixSessionProfile runtimeProfile) {
+        this(config, runtimeProfile, null);
+    }
+
+    TheFixClientFixService(TheFixClientConfig config, TheFixSessionProfile runtimeProfile, TheFixOrderStore orderStore) {
         this.config = config;
         this.runtimeProfile = runtimeProfile;
+        this.orderStore = orderStore;
         addEvent("INFO", "FIX service ready", "QuickFIX/J initiator wiring is ready for operator commands for profile " + runtimeProfile.name() + '.');
     }
 
@@ -296,6 +302,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         clOrdIdAliases.put(priorClOrdId, outboundClOrdId);
         orderView.applyAmendSubmission(outboundClOrdId, quantity, price);
         rememberOrder(orderView);
+        persistOrders();
         return true;
     }
 
@@ -320,6 +327,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         hiddenClOrdIds.add(currentClOrdId);
         hiddenClOrdIds.add(outboundClOrdId);
         addEvent("INFO", "Order removed", "Removed " + currentClOrdId + " from the blotter after cancellation.");
+        persistOrders();
         return true;
     }
 
@@ -451,6 +459,9 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     @Override
     public void close() {
         disconnect();
+        synchronized (this) {
+            persistOrders();
+        }
         autoFlowExecutor.shutdownNow();
         try {
             if (!autoFlowExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
@@ -536,6 +547,9 @@ final class TheFixClientFixService implements Application, AutoCloseable {
             }
             sentCount.incrementAndGet();
             orderView.markSent();
+            if (!autoFlowOrder) {
+                persistOrders();
+            }
             if (addManualEvent) {
                 addEvent("SUCCESS", "Order sent", "Submitted " + request.summary() + " as " + clOrdId + '.');
             }
@@ -674,6 +688,34 @@ final class TheFixClientFixService implements Application, AutoCloseable {
             String eldest = recentOrders.keySet().iterator().next();
             recentOrders.remove(eldest);
         }
+    }
+
+    /**
+     * Rehydrates the order blotter from a persisted JSON snapshot.
+     * Called once after construction when a prior session's orders are available.
+     */
+    synchronized void loadPersistedOrders(io.vertx.core.json.JsonArray ordersJson) {
+        if (ordersJson == null || ordersJson.isEmpty()) {
+            return;
+        }
+        for (int i = 0; i < ordersJson.size(); i++) {
+            io.vertx.core.json.JsonObject item = ordersJson.getJsonObject(i);
+            if (item == null) {
+                continue;
+            }
+            OrderView view = OrderView.fromJson(item);
+            if (view != null) {
+                recentOrders.put(view.clOrdId, view);
+            }
+        }
+        trimOrders();
+    }
+
+    private void persistOrders() {
+        if (orderStore == null) {
+            return;
+        }
+        orderStore.persist(config.senderCompId(), runtimeProfile.name(), recentOrdersJson());
     }
 
     private void stopAutoFlowInternal(boolean addEvent) {
@@ -1176,6 +1218,10 @@ final class TheFixClientFixService implements Application, AutoCloseable {
                     .put("side", side)
                     .put("quantity", quantity)
                     .put("limitPrice", String.format(Locale.US, "%.2f", limitPrice))
+                    .put("stopPrice", String.format(Locale.US, "%.2f", stopPrice))
+                    .put("timeInForce", timeInForce)
+                    .put("orderType", orderType)
+                    .put("priceType", priceType)
                     .put("region", region)
                     .put("market", market)
                     .put("currency", currency)
@@ -1185,9 +1231,79 @@ final class TheFixClientFixService implements Application, AutoCloseable {
                     .put("leavesQty", String.format(Locale.US, "%.0f", leavesQty))
                     .put("avgPx", avgPx > 0d ? String.format(Locale.US, "%.2f", avgPx) : "—")
                     .put("note", note)
+                    .put("autoFlow", autoFlow)
                     .put("source", autoFlow ? "Auto flow" : "Manual")
                     .put("canAmend", canAmend())
                     .put("canCancel", canCancel());
+        }
+
+        /**
+         * Reconstructs an {@link OrderView} from a JSON snapshot produced by {@link #toJson()}.
+         * Returns {@code null} when the JSON is missing essential fields.
+         */
+        static OrderView fromJson(JsonObject json) {
+            if (json == null) {
+                return null;
+            }
+            String clOrdId = json.getString("clOrdId");
+            if (clOrdId == null || clOrdId.isBlank()) {
+                return null;
+            }
+            String symbol = json.getString("symbol", "UNKNOWN");
+            String side = json.getString("side", "BUY");
+            String messageType = json.getString("messageType", "Order");
+            String messageTypeCode = json.getString("messageTypeCode", TheFixMessageType.NEW_ORDER_SINGLE.code());
+            int quantity = numberValue(json.getValue("quantity"), 0);
+            double limitPrice = doubleValue(json.getValue("limitPrice"), 0d);
+            double stopPrice = doubleValue(json.getValue("stopPrice"), 0d);
+            String timeInForce = json.getString("timeInForce", "DAY");
+            String orderType = json.getString("orderType", "LIMIT");
+            String priceType = json.getString("priceType", "PER_UNIT");
+            String region = json.getString("region", "AMERICAS");
+            String market = json.getString("market", "XNAS");
+            String currency = json.getString("currency", "USD");
+            boolean autoFlow = Boolean.TRUE.equals(json.getBoolean("autoFlow", false));
+
+            OrderView view = new OrderView(clOrdId, symbol, side, messageType, messageTypeCode,
+                    quantity, limitPrice, stopPrice, timeInForce, orderType, priceType,
+                    region, market, currency, List.of(), autoFlow);
+
+            view.status = json.getString("status", "Sent");
+            view.execType = json.getString("execType", "Pending");
+            view.note = json.getString("note", "");
+            view.cumQty = doubleValue(json.getValue("cumQty"), 0d);
+            view.leavesQty = doubleValue(json.getValue("leavesQty"), quantity);
+            String avgPxRaw = json.getString("avgPx", "—");
+            view.avgPx = "—".equals(avgPxRaw) ? 0d : doubleValue(avgPxRaw, 0d);
+            return view;
+        }
+
+        private static int numberValue(Object raw, int fallback) {
+            if (raw instanceof Number n) {
+                return n.intValue();
+            }
+            if (raw instanceof String s && !s.isBlank()) {
+                try {
+                    return (int) Double.parseDouble(s.trim());
+                } catch (NumberFormatException ignored) {
+                    return fallback;
+                }
+            }
+            return fallback;
+        }
+
+        private static double doubleValue(Object raw, double fallback) {
+            if (raw instanceof Number n) {
+                return n.doubleValue();
+            }
+            if (raw instanceof String s && !s.isBlank() && !"—".equals(s)) {
+                try {
+                    return Double.parseDouble(s.trim());
+                } catch (NumberFormatException ignored) {
+                    return fallback;
+                }
+            }
+            return fallback;
         }
 
         private static String ordStatusLabel(String raw) {
