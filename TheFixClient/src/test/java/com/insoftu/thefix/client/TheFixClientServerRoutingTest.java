@@ -57,7 +57,7 @@ class TheFixClientServerRoutingTest {
         assertEquals(200, loginResponse.statusCode());
         String token = new JsonObject(loginResponse.body()).getString("token");
 
-        for (String path : List.of("/", "/home", "/neworder", "/order", "/orders", "/blotter", "/settings", "/session-profiles", "/about", "/cucumber")) {
+        for (String path : List.of("/", "/home", "/create", "/neworder", "/order", "/orders", "/blotter", "/settings", "/session-profiles", "/about", "/cucumber")) {
             HttpResponse<String> response = send(client, path, null);
             assertEquals(200, response.statusCode(), "Unexpected status for " + path);
             assertTrue(response.headers().firstValue("content-type").orElse("").contains("text/html"), "Expected HTML for " + path);
@@ -70,9 +70,10 @@ class TheFixClientServerRoutingTest {
 
         HttpResponse<String> appJsFromAsset = send(client, "/app.js", null);
         assertEquals(200, appJsFromAsset.statusCode());
-        assertTrue(appJsFromAsset.body().contains("'order-input': '/home'"));
+        assertTrue(appJsFromAsset.body().contains("'order-input': '/create'"));
         assertTrue(appJsFromAsset.body().contains("'session-profiles': '/session-profiles'"));
         assertTrue(appJsFromAsset.body().contains("about: '/about'"));
+        assertTrue(appJsFromAsset.body().contains("case '/create':"));
         assertTrue(appJsFromAsset.body().contains("case '/neworder':"));
         assertTrue(appJsFromAsset.body().contains("case '/session-profiles':"));
         assertTrue(appJsFromAsset.body().contains("case '/about':"));
@@ -139,6 +140,10 @@ class TheFixClientServerRoutingTest {
         HttpResponse<String> trailingSlashRedirect = send(client, "/blotter/", null);
         assertEquals(308, trailingSlashRedirect.statusCode());
         assertEquals("/blotter", trailingSlashRedirect.headers().firstValue("location").orElse(""));
+
+        HttpResponse<String> createTrailingSlashRedirect = send(client, "/create/", null);
+        assertEquals(308, createTrailingSlashRedirect.statusCode());
+        assertEquals("/create", createTrailingSlashRedirect.headers().firstValue("location").orElse(""));
 
         HttpResponse<String> ordersTrailingSlashRedirect = send(client, "/orders/", null);
         assertEquals(308, ordersTrailingSlashRedirect.statusCode());
@@ -208,6 +213,94 @@ class TheFixClientServerRoutingTest {
         assertEquals(400, response.statusCode());
         assertTrue(response.body().contains("error"));
     }
+
+    @Test
+    void loginAndBearerAuthWorkEndToEnd() throws Exception {
+        Path logDir = Files.createTempDirectory("thefixclient-login-e2e-test");
+        server = new TheFixClientServer(new TheFixClientConfig(
+                "127.0.0.1",
+                0,
+                "localhost",
+                9880,
+                "FIX.4.4",
+                "THEFIX_TRDR01",
+                "LLEXSIM",
+                "FIX.4.4",
+                30,
+                5,
+                25,
+                logDir.toString(),
+                false,
+                480,
+                1
+        ));
+        server.start();
+
+        HttpClient client = HttpClient.newHttpClient();
+
+        // Unknown credentials must return 401
+        HttpResponse<String> badLogin = post(client, "/api/auth/login",
+                "{\"username\":\"nobody\",\"password\":\"wrong\"}", null);
+        assertEquals(401, badLogin.statusCode());
+        assertTrue(badLogin.body().contains("error"));
+
+        // Valid credentials must return token and user metadata
+        HttpResponse<String> loginResponse = post(client, "/api/auth/login",
+                "{\"username\":\"trader1\",\"password\":\"trader1\"}", null);
+        assertEquals(200, loginResponse.statusCode());
+        JsonObject loginBody = new JsonObject(loginResponse.body());
+        String token = loginBody.getString("token");
+        assertEquals("trader1", loginBody.getString("username"));
+        assertTrue(token != null && !token.isBlank(), "Token must be non-blank");
+
+        // Bearer auth must grant access to protected endpoints
+        HttpRequest bearerRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + server.actualPort() + "/api/auth/me"))
+                .header("Authorization", "Bearer " + token)
+                .GET()
+                .build();
+        HttpResponse<String> meResponse = client.send(bearerRequest, HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, meResponse.statusCode(), "Bearer auth must be accepted by /api/auth/me");
+        JsonObject meBody = new JsonObject(meResponse.body());
+        assertEquals("trader1", meBody.getString("username"));
+
+        // Bearer auth must also work for POST endpoints
+        HttpRequest bearerPost = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + server.actualPort() + "/api/templates"))
+                .header("Authorization", "Bearer " + token)
+                .GET()
+                .build();
+        HttpResponse<String> templatesResponse = client.send(bearerPost, HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, templatesResponse.statusCode(), "Bearer auth must be accepted for /api/templates");
+
+        // Missing token must return 401
+        HttpRequest noAuth = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + server.actualPort() + "/api/auth/me"))
+                .GET()
+                .build();
+        HttpResponse<String> noAuthResponse = client.send(noAuth, HttpResponse.BodyHandlers.ofString());
+        assertEquals(401, noAuthResponse.statusCode());
+
+        // Logout with Bearer token must succeed
+        HttpRequest logoutRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + server.actualPort() + "/api/auth/logout"))
+                .header("Authorization", "Bearer " + token)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .build();
+        HttpResponse<String> logoutResponse = client.send(logoutRequest, HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, logoutResponse.statusCode());
+
+        // Token must be invalidated after logout
+        HttpRequest postLogout = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + server.actualPort() + "/api/auth/me"))
+                .header("Authorization", "Bearer " + token)
+                .GET()
+                .build();
+        HttpResponse<String> postLogoutResponse = client.send(postLogout, HttpResponse.BodyHandlers.ofString());
+        assertEquals(401, postLogoutResponse.statusCode(), "Token must be invalidated after logout");
+    }
+
 
     private HttpResponse<String> send(HttpClient client, String path, String token) throws Exception {
         HttpRequest.Builder builder = HttpRequest.newBuilder()

@@ -20,7 +20,7 @@ const PAGE_OPTIONS = [
 ]
 
 const PAGE_PATHS = Object.freeze({
-  'order-input': '/home',
+  'order-input': '/create',
   'order-blotter': '/orders',
   'fix-messages': '/recentfixmsgs',
   'session-profiles': '/session-profiles',
@@ -82,7 +82,7 @@ function pageCodeFromPath(pathname) {
   switch (normalizePagePath(pathname)) {
     case '/':
     case '/index.html':
-    case '/home':
+    case '/create':
     case '/neworder':
     case '/order':
       return 'order-input'
@@ -3079,6 +3079,14 @@ createApp({
 
     const syncPageFromLocation = (replaceAlias = false) => {
       const currentPath = normalizePagePath(window.location.pathname)
+      // /home is the login URL — redirect to /create when already authenticated
+      if (currentPath === '/home') {
+        if (isAuthenticated.value) {
+          activePage.value = 'order-input'
+          window.history.replaceState({ page: 'order-input' }, '', '/create')
+        }
+        return
+      }
       const resolvedPage = pageCodeFromPath(currentPath)
       if (!resolvedPage) {
         activePage.value = 'order-input'
@@ -3086,7 +3094,7 @@ createApp({
         return
       }
       activePage.value = resolvedPage
-      if (replaceAlias && (currentPath === '/' || currentPath === '/index.html' || currentPath === '/order' || currentPath === '/blotter' || currentPath === '/recentfixmsgs' || currentPath === '/sessionprofiles')) {
+      if (replaceAlias && (currentPath === '/' || currentPath === '/index.html' || currentPath === '/order' || currentPath === '/blotter' || currentPath === '/recentfixmsgs' || currentPath === '/sessionprofiles' || currentPath === '/neworder')) {
         window.history.replaceState({ page: resolvedPage }, '', pagePathForCode(resolvedPage))
       }
     }
@@ -3260,12 +3268,16 @@ createApp({
         loginPassword.value = ''
         loginError.value = ''
         syncPageFromLocation(true)
-        await loadWorkbench()
       } catch (e) {
         loginError.value = 'Login failed — check your network connection'
       } finally {
         loginLoading.value = false
       }
+      // Load workbench independently — errors here do not affect the login status display
+      if (isAuthenticated.value) {
+        loadWorkbench().catch(console.warn)
+      }
+    }
     }
 
     const doLogout = async () => {
@@ -3280,6 +3292,7 @@ createApp({
       isAuthenticated.value = false
       Object.assign(currentUser, { username: '', displayName: '', role: '' })
       clearOverviewRefresh()
+      window.history.replaceState({}, '', '/home')
     }
 
     onMounted(async () => {
@@ -3298,16 +3311,26 @@ createApp({
             Object.assign(currentUser, { username: body.username, displayName: body.displayName || body.username, role: body.role || '' })
             isAuthenticated.value = true
             syncPageFromLocation(true)
-            await loadWorkbench()
+            loadWorkbench().catch(console.warn)
           } else {
             authToken.value = ''
             localStorage.removeItem(AUTH_TOKEN_KEY)
             isAuthenticated.value = false
+            if (normalizePagePath(window.location.pathname) !== '/home') {
+              window.history.replaceState({}, '', '/home')
+            }
           }
         } catch (_) {
           authToken.value = ''
           localStorage.removeItem(AUTH_TOKEN_KEY)
           isAuthenticated.value = false
+          if (normalizePagePath(window.location.pathname) !== '/home') {
+            window.history.replaceState({}, '', '/home')
+          }
+        }
+      } else {
+        if (normalizePagePath(window.location.pathname) !== '/home') {
+          window.history.replaceState({}, '', '/home')
         }
       }
     })

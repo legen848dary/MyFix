@@ -145,8 +145,8 @@ final class TheFixClientServer {
             writeJson(ctx.response(), workbench(ctx).recentFixMessages(limit, offset, ctx.request().getParam("profileName")));
         });
 
-        router.getWithRegex("^/(home|neworder|order|orders|blotter|settings|session-profiles|sessionprofiles|recentfixmsgs|cucumber|about)$").handler(ctx -> ctx.reroute("/index.html"));
-        router.getWithRegex("^/(home|neworder|order|orders|blotter|settings|session-profiles|sessionprofiles|recentfixmsgs|cucumber|about)/$").handler(ctx -> ctx.response()
+        router.getWithRegex("^/(home|create|neworder|order|orders|blotter|settings|session-profiles|sessionprofiles|recentfixmsgs|cucumber|about)$").handler(ctx -> ctx.reroute("/index.html"));
+        router.getWithRegex("^/(home|create|neworder|order|orders|blotter|settings|session-profiles|sessionprofiles|recentfixmsgs|cucumber|about)/$").handler(ctx -> ctx.response()
                 .setStatusCode(308)
                 .putHeader("location", ctx.request().path().substring(0, ctx.request().path().length() - 1))
                 .end());
@@ -213,6 +213,11 @@ final class TheFixClientServer {
     }
 
     private static String resolveToken(RoutingContext ctx) {
+        String authHeader = ctx.request().getHeader("Authorization");
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            String token = authHeader.substring(7).trim();
+            if (!token.isEmpty()) return token;
+        }
         String headerToken = ctx.request().getHeader(AUTH_TOKEN_HEADER);
         if (headerToken != null && !headerToken.isBlank()) {
             return headerToken.trim();
