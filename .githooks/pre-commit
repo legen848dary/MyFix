@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Pre-commit hook: run all tests before every commit.
+# Activated automatically via: git config core.hooksPath .githooks
+# (run `git config core.hooksPath .githooks` once after cloning)
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+echo "▶ Running test suite before commit…"
+./testall.sh
+
+echo "✔ All tests passed — proceeding with commit."
