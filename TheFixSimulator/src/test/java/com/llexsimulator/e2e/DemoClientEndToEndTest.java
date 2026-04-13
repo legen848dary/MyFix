@@ -38,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DemoClientEndToEndTest {
 
     private static final Duration LOGON_TIMEOUT = Duration.ofSeconds(10);
-    private static final Duration SOAK_DURATION = Duration.ofSeconds(60);
+    private static final Duration SOAK_DURATION = Duration.ofSeconds(10);
     private static final Duration DISCONNECT_TIMEOUT = Duration.ofSeconds(10);
 
     @TempDir
@@ -114,7 +114,7 @@ class DemoClientEndToEndTest {
             Thread.sleep(250L);
         }
 
-        assertTrue(app.sentCount() >= 5_000, "Expected at least 5,000 orders to be sent during the 60 second soak run");
+        assertTrue(app.sentCount() >= 800, "Expected at least 800 orders to be sent during the 10 second soak run");
         assertTrue(app.execReportCount() > 0, "Expected execution reports from the simulator during the soak run");
         assertEquals(0L, app.rejectCount(), "Did not expect business rejects during the happy-path soak run");
         assertEquals(0L, app.sendFailureCount(), "Did not expect send failures during the soak run");

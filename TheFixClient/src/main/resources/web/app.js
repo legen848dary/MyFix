@@ -3278,7 +3278,6 @@ createApp({
         loadWorkbench().catch(console.warn)
       }
     }
-    }
 
     const doLogout = async () => {
       try {
