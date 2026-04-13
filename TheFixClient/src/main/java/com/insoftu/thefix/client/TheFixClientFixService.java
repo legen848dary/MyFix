@@ -66,7 +66,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 
 final class TheFixClientFixService implements Application, AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(TheFixClientFixService.class);
@@ -95,13 +94,13 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     private final TheFixClientConfig config;
     private final TheFixSessionProfile runtimeProfile;
     private final TheFixOrderStore orderStore;
-    private final AtomicReference<SessionID> activeSessionId = new AtomicReference<>();
-    private final AtomicLong sequence = new AtomicLong();
-    private final AtomicLong sentCount = new AtomicLong();
-    private final AtomicLong execReportCount = new AtomicLong();
-    private final AtomicLong cancelCount = new AtomicLong();
-    private final AtomicLong rejectCount = new AtomicLong();
-    private final AtomicLong sendFailureCount = new AtomicLong();
+    private SessionID activeSessionId;
+    private long sequence;
+    private long sentCount;
+    private long execReportCount;
+    private long cancelCount;
+    private long rejectCount;
+    private long sendFailureCount;
     private final ScheduledExecutorService autoFlowExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread thread = new Thread(r, "thefixclient-auto-flow");
         thread.setDaemon(true);
@@ -199,7 +198,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
             loggedOn = false;
             connectedAt = null;
             connectedProfile = null;
-            activeSessionId.set(null);
+            activeSessionId = null;
             sessionStatus = "Standby";
 
             if (initiator == null) {
@@ -231,7 +230,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     }
 
     synchronized ActionOutcome resetSequenceNumbers() {
-        SessionID sessionId = activeSessionId.get();
+        SessionID sessionId = activeSessionId;
         if (!loggedOn || sessionId == null) {
             return new ActionOutcome(false, "Connect the selected FIX session before resetting sequence numbers.");
         }
@@ -339,7 +338,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         if (!sendBlotterAction(outboundClOrdId, request, "Order cancel sent", "Submitted cancel for " + currentClOrdId + " as " + outboundClOrdId + '.')) {
             return false;
         }
-        cancelCount.incrementAndGet();
+        cancelCount++;
         recentOrders.remove(currentClOrdId);
         hiddenClOrdIds.add(currentClOrdId);
         hiddenClOrdIds.add(outboundClOrdId);
@@ -392,11 +391,11 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         return new JsonObject()
                 .put("readyState", loggedOn ? "FIX live" : initiator != null ? "Connecting" : "UI ready")
                 .put("openOrders", pendingOrders())
-                .put("sentOrders", sentCount.get())
-                .put("executionReports", execReportCount.get())
-                .put("cancels", cancelCount.get())
-                .put("rejects", rejectCount.get())
-                .put("sendFailures", sendFailureCount.get())
+                .put("sentOrders", sentCount)
+                .put("executionReports", execReportCount)
+                .put("cancels", cancelCount)
+                .put("rejects", rejectCount)
+                .put("sendFailures", sendFailureCount)
                 .put("sessionUptime", formatUptime());
     }
 
@@ -428,7 +427,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
 
     @Override
     public synchronized void onLogon(SessionID sessionId) {
-        activeSessionId.set(sessionId);
+        activeSessionId = sessionId;
         loggedOn = true;
         connectedAt = Instant.now();
         sessionStatus = autoFlowActive ? "Connected · bulk flow live" : "Connected";
@@ -437,7 +436,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
 
     @Override
     public synchronized void onLogout(SessionID sessionId) {
-        activeSessionId.compareAndSet(sessionId, null);
+        if (Objects.equals(activeSessionId, sessionId)) activeSessionId = null;
         loggedOn = false;
         connectedAt = null;
         sessionStatus = connectionRequested ? "Reconnecting" : "Standby";
@@ -523,7 +522,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
                     completeAutoFlow();
                     return;
                 }
-                long variantSeed = sequence.incrementAndGet();
+                long variantSeed = ++sequence;
                 boolean sent = sendOrderInternal(template.bulkVariant(variantSeed), true, false);
                 if (sent && autoFlowRemaining > 0L) {
                     autoFlowRemaining--;
@@ -540,12 +539,12 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     }
 
     private boolean sendOrderInternal(TheFixOrderRequest request, boolean autoFlowOrder, boolean addManualEvent) {
-        SessionID sessionId = activeSessionId.get();
+        SessionID sessionId = activeSessionId;
         if (!loggedOn || sessionId == null) {
             if (autoFlowOrder) {
                 return false;
             }
-            sendFailureCount.incrementAndGet();
+            sendFailureCount++;
             addEvent("WARN", "Order blocked", "No active FIX session is logged on. Prime the session first.");
             return false;
         }
@@ -556,7 +555,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
             if (autoFlowOrder) {
                 return false;
             }
-            sendFailureCount.incrementAndGet();
+            sendFailureCount++;
             addEvent("WARN", "Order blocked", "QuickFIX/J session is not logged on yet.");
             return false;
         }
@@ -568,14 +567,14 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         try {
             boolean sent = Session.sendToTarget(buildOutboundMessage(clOrdId, request), sessionId);
             if (!sent) {
-                sendFailureCount.incrementAndGet();
+                sendFailureCount++;
                 orderView.markFailure("SEND_FAILED", "QuickFIX/J returned false while sending to target.");
                 if (!autoFlowOrder) {
                     addEvent("WARN", "Order send failed", "The simulator session rejected the outbound send attempt for " + clOrdId + '.');
                 }
                 return false;
             }
-            sentCount.incrementAndGet();
+            sentCount++;
             orderView.markSent();
             if (!autoFlowOrder) {
                 persistOrders();
@@ -585,12 +584,12 @@ final class TheFixClientFixService implements Application, AutoCloseable {
             }
             return true;
         } catch (SessionNotFound exception) {
-            sendFailureCount.incrementAndGet();
+            sendFailureCount++;
             orderView.markFailure("SESSION_NOT_FOUND", rootMessage(exception));
             addEvent("WARN", "Session unavailable", "Unable to route order because the FIX session could not be found.");
             return false;
         } catch (Exception exception) {
-            sendFailureCount.incrementAndGet();
+            sendFailureCount++;
             orderView.markFailure("ERROR", rootMessage(exception));
             addEvent("WARN", "Unexpected send error", rootMessage(exception));
             log.warn("Unexpected order send failure", exception);
@@ -599,9 +598,9 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     }
 
     private boolean sendBlotterAction(String outboundClOrdId, TheFixOrderRequest request, String successTitle, String successDetail) {
-        SessionID sessionId = activeSessionId.get();
+        SessionID sessionId = activeSessionId;
         if (!loggedOn || sessionId == null) {
-            sendFailureCount.incrementAndGet();
+            sendFailureCount++;
             addEvent("WARN", "Order blocked", "No active FIX session is logged on. Prime the session first.");
             return false;
         }
@@ -609,7 +608,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         @SuppressWarnings("resource")
         Session quickFixSession = Session.lookupSession(sessionId);
         if (quickFixSession == null || !quickFixSession.isLoggedOn()) {
-            sendFailureCount.incrementAndGet();
+            sendFailureCount++;
             addEvent("WARN", "Order blocked", "QuickFIX/J session is not logged on yet.");
             return false;
         }
@@ -617,19 +616,19 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         try {
             boolean sent = Session.sendToTarget(buildOutboundMessage(outboundClOrdId, request), sessionId);
             if (!sent) {
-                sendFailureCount.incrementAndGet();
+                sendFailureCount++;
                 addEvent("WARN", "Order send failed", "The simulator session rejected the outbound send attempt for " + outboundClOrdId + '.');
                 return false;
             }
-            sentCount.incrementAndGet();
+            sentCount++;
             addEvent("SUCCESS", successTitle, successDetail);
             return true;
         } catch (SessionNotFound exception) {
-            sendFailureCount.incrementAndGet();
+            sendFailureCount++;
             addEvent("WARN", "Session unavailable", "Unable to route order because the FIX session could not be found.");
             return false;
         } catch (Exception exception) {
-            sendFailureCount.incrementAndGet();
+            sendFailureCount++;
             addEvent("WARN", "Unexpected send error", rootMessage(exception));
             log.warn("Unexpected blotter action send failure", exception);
             return false;
@@ -639,9 +638,9 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     private void handleExecutionReport(Message message) {
         boolean rejectedExecutionReport = isRejectedExecutionReport(message);
         if (rejectedExecutionReport) {
-            rejectCount.incrementAndGet();
+            rejectCount++;
         } else {
-            execReportCount.incrementAndGet();
+            execReportCount++;
         }
         String rawClOrdId = safeString(message, ClOrdID.FIELD, "UNKNOWN");
         String clOrdId = resolveTrackedClOrdId(rawClOrdId);
@@ -657,8 +656,8 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     }
 
     private void handleReject(Message message, String messageType) {
-        rejectCount.incrementAndGet();
-        String clOrdId = resolveTrackedClOrdId(safeString(message, ClOrdID.FIELD, "REJECT-" + sequence.incrementAndGet()));
+        rejectCount++;
+        String clOrdId = resolveTrackedClOrdId(safeString(message, ClOrdID.FIELD, "REJECT-" + ++sequence));
         if (hiddenClOrdIds.contains(clOrdId)) {
             return;
         }
@@ -903,7 +902,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     }
 
     private String nextClOrdId(String prefix) {
-        return prefix + '-' + System.currentTimeMillis() + '-' + sequence.incrementAndGet();
+        return prefix + '-' + System.currentTimeMillis() + '-' + ++sequence;
     }
 
     private int pendingOrders() {
