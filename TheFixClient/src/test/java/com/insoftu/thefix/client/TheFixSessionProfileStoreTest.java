@@ -106,7 +106,9 @@ class TheFixSessionProfileStoreTest {
                 5,
                 25,
                 tempDir.resolve("client-a-quickfixj").toString(),
-                false
+                false,
+                480,
+                1
         );
         TheFixClientConfig secondConfig = new TheFixClientConfig(
                 "0.0.0.0",
@@ -121,7 +123,9 @@ class TheFixSessionProfileStoreTest {
                 5,
                 25,
                 tempDir.resolve("client-b-quickfixj").toString(),
-                false
+                false,
+                480,
+                1
         );
 
         TheFixSessionProfileStore firstStore = new TheFixSessionProfileStore(firstConfig);
@@ -149,7 +153,9 @@ class TheFixSessionProfileStoreTest {
                 5,
                 25,
                 "build/test-profile-store-quickfixj",
-                false
+                false,
+                480,
+                1
         );
     }
 }

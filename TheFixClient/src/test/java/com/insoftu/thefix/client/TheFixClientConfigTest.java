@@ -34,7 +34,9 @@ class TheFixClientConfigTest {
                 5,
                 25,
                 "logs/thefixclient/test-quickfixj",
-                false
+                false,
+                480,
+                1
         );
 
         assertEquals("127.0.0.1", config.toFixDemoClientConfig().host());

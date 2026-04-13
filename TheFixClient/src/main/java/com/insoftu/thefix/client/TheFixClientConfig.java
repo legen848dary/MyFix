@@ -15,7 +15,9 @@ record TheFixClientConfig(
         int reconnectIntervalSec,
         int defaultRatePerSecond,
         String quickFixLogDir,
-        boolean rawMessageLoggingEnabled
+        boolean rawMessageLoggingEnabled,
+        int sessionTimeoutMinutes,
+        int orderDataRetentionDays
 ) {
     static final int DEFAULT_PORT = 8081;
     private static final String WEB_PORT_PROPERTY = "thefix.client.port";
@@ -35,7 +37,18 @@ record TheFixClientConfig(
                 resolvePositiveInt("thefix.fix.reconnectIntervalSec", "THEFIX_FIX_RECONNECT_INTERVAL_SEC", "fix.demo.reconnectIntervalSec", "FIX_CLIENT_RECONNECT_INTERVAL_SEC", 5),
                 resolvePositiveInt("thefix.fix.defaultRatePerSecond", "THEFIX_FIX_DEFAULT_RATE", "fix.demo.rate", "FIX_DEMO_RATE", 25),
                 resolveString("thefix.fix.logDir", "THEFIX_FIX_LOG_DIR", "fix.demo.logDir", null, "logs/thefixclient/quickfixj"),
-                resolveBoolean("thefix.fix.rawLoggingEnabled", "THEFIX_FIX_RAW_LOGGING_ENABLED", "fix.demo.rawLoggingEnabled", "FIX_CLIENT_RAW_LOGGING_ENABLED", false)
+                resolveBoolean("thefix.fix.rawLoggingEnabled", "THEFIX_FIX_RAW_LOGGING_ENABLED", "fix.demo.rawLoggingEnabled", "FIX_CLIENT_RAW_LOGGING_ENABLED", false),
+                resolvePositiveInt("thefix.client.sessionTimeoutMinutes", "THEFIX_CLIENT_SESSION_TIMEOUT_MINUTES", null, null, 480),
+                resolvePositiveInt("thefix.client.orderDataRetentionDays", "THEFIX_CLIENT_ORDER_DATA_RETENTION_DAYS", null, null, 1)
+        );
+    }
+
+    /** Returns a copy of this config with a different {@code quickFixLogDir}. */
+    TheFixClientConfig withQuickFixLogDir(String newLogDir) {
+        return new TheFixClientConfig(
+                host, port, fixHost, fixPort, beginString, senderCompId, targetCompId,
+                defaultApplVerId, heartBtIntSec, reconnectIntervalSec, defaultRatePerSecond,
+                newLogDir, rawMessageLoggingEnabled, sessionTimeoutMinutes, orderDataRetentionDays
         );
     }
 

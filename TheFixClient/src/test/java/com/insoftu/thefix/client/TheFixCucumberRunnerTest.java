@@ -33,7 +33,7 @@ class TheFixCucumberRunnerTest {
                 "0.0.0.0", 8081, "localhost", 9880,
                 "FIX.4.4", "THEFIX_TRDR01", "LLEXSIM",
                 "FIX.4.4", 30, 5, 25,
-                tempDir.toString(), false);
+                tempDir.toString(), false, 480, 1);
         TheFixSessionProfileStore store = new TheFixSessionProfileStore(config);
         store.updateStoragePath(tempDir.toString());
         state = new TheFixClientWorkbenchState(config, store,

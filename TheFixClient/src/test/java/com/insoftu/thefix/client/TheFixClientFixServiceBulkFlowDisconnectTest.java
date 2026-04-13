@@ -44,7 +44,9 @@ class TheFixClientFixServiceBulkFlowDisconnectTest {
                 1,
                 25,
                 tempDir.resolve("quickfix").toString(),
-                false
+                false,
+                480,
+                1
         );
     }
 
