@@ -496,7 +496,9 @@ final class TheFixCucumberRunner {
                     int qty = Integer.parseInt(m.group(1));
                     String symbol = m.group(2);
                     String market = m.group(3).toUpperCase(Locale.ROOT);
+                    String region = regionForMarket(market);
                     JsonObject req = nosRequest(ctx, symbol, "BUY", qty, "LIMIT", 100.25, 0d, "DAY")
+                            .put("region", region)
                             .put("market", market);
                     return captureSentOrder(state.sendOrder(req), ctx,
                             "Sent NOS for " + qty + " " + symbol + " on " + market);
@@ -892,6 +894,14 @@ final class TheFixCucumberRunner {
                 .put("burstSize", burstSize)
                 .put("burstIntervalMs", burstIntervalMs)
                 .put("totalOrders", totalOrders);
+    }
+
+    private static String regionForMarket(String marketCode) {
+        return switch (marketCode.toUpperCase(Locale.ROOT)) {
+            case "XHKG", "XTKS", "XSES", "XSHG" -> "ASIA";
+            case "XLON", "XPAR", "XETR", "XSWX" -> "EMEA";
+            default -> "AMERICAS";
+        };
     }
 
     private static String normalizeSide(String raw) {

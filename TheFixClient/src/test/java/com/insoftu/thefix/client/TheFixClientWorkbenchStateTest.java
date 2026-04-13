@@ -298,6 +298,51 @@ class TheFixClientWorkbenchStateTest {
         state.close();
     }
 
+    @Test
+    void previewRejectsXlonOrderWhenRegionIsAmericas() {
+        // This documents the root cause of the "Send an order on the London Stock Exchange"
+        // scenario failure: region=AMERICAS and market=XLON do not match → INVALID.
+        TheFixClientWorkbenchState state = createState();
+
+        JsonObject preview = state.previewOrder(new JsonObject()
+                .put("region", "AMERICAS")
+                .put("market", "XLON")
+                .put("symbol", "BP.L")
+                .put("side", "BUY")
+                .put("quantity", 100)
+                .put("orderType", "LIMIT")
+                .put("priceType", "PER_UNIT")
+                .put("timeInForce", "DAY")
+                .put("currency", "GBP")
+                .put("price", 100.25));
+
+        assertEquals("INVALID", preview.getString("status"));
+        assertTrue(preview.getJsonArray("warnings").encode().contains("Select a valid market for the chosen region."));
+        state.close();
+    }
+
+    @Test
+    void previewAcceptsXlonOrderWhenRegionIsEmea() {
+        // Counterpart to the test above: EMEA+XLON is a valid combination.
+        TheFixClientWorkbenchState state = createState();
+
+        JsonObject preview = state.previewOrder(new JsonObject()
+                .put("region", "EMEA")
+                .put("market", "XLON")
+                .put("symbol", "BP.L")
+                .put("side", "BUY")
+                .put("quantity", 100)
+                .put("orderType", "LIMIT")
+                .put("priceType", "PER_UNIT")
+                .put("timeInForce", "DAY")
+                .put("currency", "GBP")
+                .put("price", 100.25));
+
+        assertEquals("READY_PENDING_CONNECTION", preview.getString("status"));
+        assertTrue(preview.getJsonArray("warnings").isEmpty());
+        state.close();
+    }
+
     private static TheFixClientConfig testConfig() {
         return new TheFixClientConfig(
                 "0.0.0.0",

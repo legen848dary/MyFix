@@ -502,4 +502,45 @@ class TheFixCucumberRunnerTest {
         String name = result.getJsonArray("scenarios").getJsonObject(0).getString("name");
         assertEquals("My specific scenario name", name);
     }
+
+    // -----------------------------------------------------------------------
+    // Market-specific order step resolves region from market code
+    // -----------------------------------------------------------------------
+
+    @Test
+    void marketSpecificOrderStepDerivesEmeaRegionFromXlonMarketCode() {
+        // Before the fix, "on market XLON" sent region=AMERICAS+market=XLON which caused
+        // buildPreview to add a "Select a valid market for the chosen region" warning and
+        // return early WITHOUT calling the service layer → sendFailures stays 0.
+        // After the fix, regionForMarket("XLON") returns "EMEA", validation passes, and
+        // sendOrderInternal IS called (but fails because no live FIX session) → sendFailures=1.
+        String text = """
+                Feature: Market routing
+
+                  Scenario: Send order on London Stock Exchange (EMEA market)
+                    When I send a New Order Single for 100 shares of "BP.L" on market "XLON"
+                """;
+
+        runner.run(text, null);
+
+        int sendFailures = state.snapshot().getJsonObject("kpis", new JsonObject()).getInteger("sendFailures", -1);
+        assertEquals(1, sendFailures,
+                "EMEA/XLON should pass validation and reach the service layer (sendFailures must be 1, not 0)");
+    }
+
+    @Test
+    void marketSpecificOrderStepDerivesAsiaRegionFromXtksMarketCode() {
+        String text = """
+                Feature: Market routing
+
+                  Scenario: Send order on Tokyo Stock Exchange (ASIA market)
+                    When I send a New Order Single for 50 shares of "7203.T" on market "XTKS"
+                """;
+
+        runner.run(text, null);
+
+        int sendFailures = state.snapshot().getJsonObject("kpis", new JsonObject()).getInteger("sendFailures", -1);
+        assertEquals(1, sendFailures,
+                "ASIA/XTKS should pass validation and reach the service layer (sendFailures must be 1, not 0)");
+    }
 }

@@ -194,6 +194,69 @@ const FIX_TO_TIF = Object.freeze(Object.fromEntries(Object.entries(TIF_TO_FIX).m
 const PRICE_TYPE_TO_FIX = Object.freeze({ PER_UNIT: '1', PERCENTAGE: '2', FIXED_AMOUNT: '3', YIELD: '9', SPREAD: '6' })
 const FIX_TO_PRICE_TYPE = Object.freeze(Object.fromEntries(Object.entries(PRICE_TYPE_TO_FIX).map(([key, value]) => [value, key])))
 
+const CUCUMBER_STEP_CATEGORIES = Object.freeze([
+  {
+    title: 'Session',
+    steps: [
+      'the FIX session is connected',
+      'the FIX session for profile "Profile Name" is connected',
+      'the FIX session is disconnected',
+      'I wait 2 seconds',
+    ]
+  },
+  {
+    title: 'Single Order',
+    steps: [
+      'I send a New Order Single for 100 shares of "AAPL"',
+      'I send a New Order Single to buy 100 shares of "AAPL" at 100.25',
+      'I send a New Order Single to sell 100 shares of "AAPL" at 100.25',
+      'I send a New Order Single to buy 100 shares of "AAPL" as MARKET order',
+      'I send a BUY New Order Single for 100 shares of "AAPL" at 100.25 with TIF DAY',
+      'I send a STOP order to buy 100 shares of "AAPL" at stop 98.00',
+      'I send a STOP_LIMIT order to buy 100 shares of "AAPL" at limit 100.25 stop 98.00',
+      'I send a New Order Single for 100 shares of "BP.L" on market "XLON"',
+    ]
+  },
+  {
+    title: 'Cancel / Amend',
+    steps: [
+      'I cancel the order with ClOrdID "CLORD-001"',
+      'I cancel the most recently sent order',
+      'I amend the order with ClOrdID "CLORD-001" to quantity 200 and price 99.50',
+    ]
+  },
+  {
+    title: 'Bulk Flow',
+    steps: [
+      'I start a fixed rate bulk flow at 10 orders per second',
+      'I start a fixed rate bulk flow of 100 total orders at 10 orders per second',
+      'I start a burst bulk flow with 5 orders per burst every 1000 ms',
+      'I start a burst bulk flow of 50 total orders with 5 per burst every 1000 ms',
+      'I stop the bulk order flow',
+    ]
+  },
+  {
+    title: 'Verification',
+    steps: [
+      'the session should be connected',
+      'the session should not be connected',
+      'the sent orders count should be at least 1',
+      'the sent orders count should be exactly 1',
+      'the execution report count should be at least 1',
+      'the order blotter should contain at least 1 orders',
+      'the order blotter should contain an order with symbol "AAPL"',
+      'the order blotter should contain an order with status "FILLED"',
+      'the FIX tape should contain at least 1 messages',
+      'the cancel count should be at least 1',
+      'the reject count should be at most 1',
+      'the bulk flow should be running',
+      'the bulk flow should not be running',
+      'the send failure count should be 0',
+    ]
+  },
+])
+const CUCUMBER_ALL_STEPS = Object.freeze(CUCUMBER_STEP_CATEGORIES.flatMap(cat => cat.steps))
+
 createApp({
   template: `
     <div class="shell">
@@ -1170,6 +1233,7 @@ createApp({
                 <div class="compact-card">
                   <div class="cucumber-editor-header">
                     <p class="eyebrow">Feature file</p>
+                    <p class="cucumber-editor-hint">Type <span class="mono">Given</span>, <span class="mono">When</span>, <span class="mono">Then</span>… and press Space to get step suggestions. Click any step in the reference panel below to insert it.</p>
                     <div class="button-row">
                       <button class="button button--soft" @click="loadCucumberSample" :disabled="cucumberRunning">Load sample</button>
                       <button class="button button--soft" @click="uploadFeatureFile" :disabled="cucumberRunning">Upload .feature</button>
@@ -1178,11 +1242,26 @@ createApp({
                       </button>
                     </div>
                   </div>
-                  <textarea
-                    v-model="cucumberFeatureText"
-                    class="cucumber-editor"
-                    placeholder="Paste a Gherkin feature file here, click &#x27;Upload .feature&#x27; to load from disk, or click &#x27;Load sample&#x27; to see an example…"
-                    spellcheck="false"></textarea>
+                  <div class="cucumber-editor-wrap">
+                    <textarea
+                      ref="cucumberEditorRef"
+                      v-model="cucumberFeatureText"
+                      class="cucumber-editor"
+                      placeholder="Paste a Gherkin feature file here, click 'Upload .feature' to load from disk, or click 'Load sample' to see an example…"
+                      spellcheck="false"
+                      @input="onCucumberInput"
+                      @keydown.capture="onCucumberKeydown"
+                      @blur="onCucumberBlur"></textarea>
+                    <ul v-if="acVisible && acItems.length" class="ac-dropdown" :style="acStyle" role="listbox" aria-label="Step completions">
+                      <li v-for="(item, idx) in acItems" :key="item.label"
+                          class="ac-item" :class="{ 'ac-item--active': idx === acActiveIndex }"
+                          role="option" :aria-selected="idx === acActiveIndex"
+                          @mousedown.prevent="confirmAcItem(item)">
+                        <span v-if="item.category" class="ac-item__category">{{ item.category }}</span>
+                        <span class="ac-item__label mono">{{ item.label }}</span>
+                      </li>
+                    </ul>
+                  </div>
                   <p class="compact-card__copy" style="margin-top: 10px;">
                     Supported step keywords: <span class="mono">Given</span>, <span class="mono">When</span>, <span class="mono">Then</span>, <span class="mono">And</span>, <span class="mono">But</span>.
                     Scenario Outlines with Examples tables are fully supported.
@@ -1190,64 +1269,18 @@ createApp({
                 </div>
 
                 <div class="compact-card cucumber-step-reference">
-                  <p class="eyebrow">Step reference</p>
+                  <p class="eyebrow">Step reference <span class="cucumber-step-ref-hint">(click any step to insert at cursor)</span></p>
                   <div class="cucumber-step-ref-grid">
-                    <div class="cucumber-step-ref-group">
-                      <p class="cucumber-step-ref-title">Session</p>
+                    <div v-for="group in cucumberStepCategories" :key="group.title" class="cucumber-step-ref-group">
+                      <p class="cucumber-step-ref-title">{{ group.title }}</p>
                       <ul class="cucumber-step-ref-list">
-                        <li><span class="mono">the FIX session is connected</span></li>
-                        <li><span class="mono">the FIX session for profile "name" is connected</span></li>
-                        <li><span class="mono">the FIX session is disconnected</span></li>
-                        <li><span class="mono">I wait N seconds</span></li>
-                      </ul>
-                    </div>
-                    <div class="cucumber-step-ref-group">
-                      <p class="cucumber-step-ref-title">Single Order</p>
-                      <ul class="cucumber-step-ref-list">
-                        <li><span class="mono">I send a New Order Single for N shares of "SYM"</span></li>
-                        <li><span class="mono">I send a New Order Single to buy/sell N shares of "SYM" at P</span></li>
-                        <li><span class="mono">I send a New Order Single to buy N shares of "SYM" as MARKET order</span></li>
-                        <li><span class="mono">I send a BUY New Order Single for N shares of "SYM" at P with TIF DAY</span></li>
-                        <li><span class="mono">I send a STOP order to buy N shares of "SYM" at stop P</span></li>
-                        <li><span class="mono">I send a STOP_LIMIT order to buy N shares of "SYM" at limit P stop S</span></li>
-                        <li><span class="mono">I send a New Order Single for N shares of "SYM" on market "MKT"</span></li>
-                      </ul>
-                    </div>
-                    <div class="cucumber-step-ref-group">
-                      <p class="cucumber-step-ref-title">Cancel / Amend</p>
-                      <ul class="cucumber-step-ref-list">
-                        <li><span class="mono">I cancel the order with ClOrdID "ID"</span></li>
-                        <li><span class="mono">I cancel the most recently sent order</span></li>
-                        <li><span class="mono">I amend the order with ClOrdID "ID" to quantity N and price P</span></li>
-                      </ul>
-                    </div>
-                    <div class="cucumber-step-ref-group">
-                      <p class="cucumber-step-ref-title">Bulk Flow</p>
-                      <ul class="cucumber-step-ref-list">
-                        <li><span class="mono">I start a fixed rate bulk flow at N orders per second</span></li>
-                        <li><span class="mono">I start a fixed rate bulk flow of N total orders at R orders per second</span></li>
-                        <li><span class="mono">I start a burst bulk flow with N orders per burst every M ms</span></li>
-                        <li><span class="mono">I start a burst bulk flow of N total orders with B per burst every M ms</span></li>
-                        <li><span class="mono">I stop the bulk order flow</span></li>
-                      </ul>
-                    </div>
-                    <div class="cucumber-step-ref-group">
-                      <p class="cucumber-step-ref-title">Verification</p>
-                      <ul class="cucumber-step-ref-list">
-                        <li><span class="mono">the session should be connected</span></li>
-                        <li><span class="mono">the session should not be connected</span></li>
-                        <li><span class="mono">the sent orders count should be at least N</span></li>
-                        <li><span class="mono">the sent orders count should be exactly N</span></li>
-                        <li><span class="mono">the execution report count should be at least N</span></li>
-                        <li><span class="mono">the order blotter should contain at least N orders</span></li>
-                        <li><span class="mono">the order blotter should contain an order with symbol "SYM"</span></li>
-                        <li><span class="mono">the order blotter should contain an order with status "STATUS"</span></li>
-                        <li><span class="mono">the FIX tape should contain at least N messages</span></li>
-                        <li><span class="mono">the cancel count should be at least N</span></li>
-                        <li><span class="mono">the reject count should be at most N</span></li>
-                        <li><span class="mono">the bulk flow should be running</span></li>
-                        <li><span class="mono">the bulk flow should not be running</span></li>
-                        <li><span class="mono">the send failure count should be N</span></li>
+                        <li v-for="step in group.steps" :key="step"
+                            class="cucumber-step-ref-item"
+                            role="button"
+                            :title="'Insert: ' + step"
+                            @click.prevent="insertStepFromRef(step)">
+                          <span class="mono">{{ step }}</span>
+                        </li>
                       </ul>
                     </div>
                   </div>
@@ -1595,6 +1628,12 @@ createApp({
     const cucumberFeatureText = ref('')
     const cucumberRunning = ref(false)
     const cucumberResult = ref(null)
+    const cucumberEditorRef = ref(null)
+    // Autocomplete dropdown
+    const acVisible = ref(false)
+    const acItems = ref([])
+    const acActiveIndex = ref(0)
+    const acStyle = ref({})
 
     const amendDraft = reactive({
       clOrdId: '',
@@ -3232,6 +3271,107 @@ createApp({
       return '✘'
     }
 
+    // --- Scenario editor: click-to-insert from Step Reference panel ---
+    const insertStepFromRef = (stepText) => {
+      const el = cucumberEditorRef.value
+      if (!el) { cucumberFeatureText.value += '  And ' + stepText + '\n'; return }
+      const start = el.selectionStart
+      const end = el.selectionEnd
+      const current = cucumberFeatureText.value
+      const lineStart = current.lastIndexOf('\n', start - 1) + 1
+      const indent = '  '
+      const prefix = lineStart === start ? indent + 'And ' : '\n' + indent + 'And '
+      const insertion = prefix + stepText
+      cucumberFeatureText.value = current.substring(0, start) + insertion + current.substring(end)
+      Vue.nextTick(() => {
+        const cursor = start + insertion.length
+        el.focus(); el.setSelectionRange(cursor, cursor)
+      })
+    }
+
+    // --- Scenario editor: autocomplete support ---
+    const _KEYWORD_RE = /^(feature|scenario outline|scenario|background|given|when|then|and|but)\s+/i
+    const _dismissAc = () => { acVisible.value = false; acItems.value = []; acActiveIndex.value = 0 }
+
+    const _buildSuggestions = (el) => {
+      const text = el.value
+      const pos = el.selectionStart
+      const lineStart = text.lastIndexOf('\n', pos - 1) + 1
+      const line = text.substring(lineStart, pos)
+      const trimmed = line.trimStart()
+      const m = trimmed.match(_KEYWORD_RE)
+      if (!m) return []
+      const query = trimmed.substring(m[0].length).toLowerCase()
+      if (query.length < 1) {
+        return CUCUMBER_ALL_STEPS.map(s => ({ label: s, category: null })).slice(0, 8)
+      }
+      const matches = []
+      for (const cat of CUCUMBER_STEP_CATEGORIES) {
+        for (const s of cat.steps) {
+          if (s.toLowerCase().includes(query)) matches.push({ label: s, category: cat.title })
+        }
+      }
+      return matches.slice(0, 8)
+    }
+
+    const _computeAcStyle = (el) => {
+      const lineHeight = 20
+      const paddingTop = 10
+      const text = el.value.substring(0, el.selectionStart)
+      const lineCount = (text.match(/\n/g) || []).length
+      const rect = el.getBoundingClientRect()
+      const rawTop = rect.top + paddingTop + (lineCount + 1) * lineHeight - el.scrollTop
+      const top = Math.min(rawTop, rect.bottom - 20)
+      return { position: 'fixed', top: top + 'px', left: rect.left + 'px', minWidth: (rect.width * 0.7) + 'px' }
+    }
+
+    const onCucumberInput = () => {
+      const el = cucumberEditorRef.value
+      if (!el) return
+      const items = _buildSuggestions(el)
+      if (items.length) {
+        acItems.value = items
+        acActiveIndex.value = 0
+        acStyle.value = _computeAcStyle(el)
+        acVisible.value = true
+      } else {
+        _dismissAc()
+      }
+    }
+
+    const _confirmAcItem = (item) => {
+      const el = cucumberEditorRef.value
+      if (!el) return
+      const text = cucumberFeatureText.value
+      const pos = el.selectionStart
+      const lineStart = text.lastIndexOf('\n', pos - 1) + 1
+      const line = text.substring(lineStart, pos)
+      const trimmed = line.trimStart()
+      const m = trimmed.match(_KEYWORD_RE)
+      if (!m) { _dismissAc(); return }
+      const keyword = line.substring(0, line.indexOf(m[0].trimStart()) + m[1].length + 1)
+      const newLine = keyword + ' ' + item.label
+      cucumberFeatureText.value = text.substring(0, lineStart) + newLine + text.substring(pos)
+      const cursor = lineStart + newLine.length
+      _dismissAc()
+      Vue.nextTick(() => { el.focus(); el.setSelectionRange(cursor, cursor) })
+    }
+
+    const onCucumberKeydown = (event) => {
+      if (!acVisible.value) return
+      if (event.key === 'ArrowDown') {
+        event.preventDefault(); acActiveIndex.value = (acActiveIndex.value + 1) % acItems.value.length
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault(); acActiveIndex.value = (acActiveIndex.value - 1 + acItems.value.length) % acItems.value.length
+      } else if (event.key === 'Enter' || event.key === 'Tab') {
+        if (acItems.value.length) { event.preventDefault(); _confirmAcItem(acItems.value[acActiveIndex.value]) }
+      } else if (event.key === 'Escape') {
+        event.preventDefault(); _dismissAc()
+      }
+    }
+
+    const onCucumberBlur = () => { setTimeout(_dismissAc, 150) }
+
     return {
       overview,
       session,
@@ -3408,12 +3548,23 @@ createApp({
       cucumberFeatureText,
       cucumberRunning,
       cucumberResult,
+      cucumberEditorRef,
+      acVisible,
+      acItems,
+      acActiveIndex,
+      acStyle,
+      cucumberStepCategories: CUCUMBER_STEP_CATEGORIES,
       loadCucumberSample,
       uploadFeatureFile,
       runCucumberScenarios,
       cucumberScenarioStatusClass,
       cucumberStepStatusClass,
-      cucumberStepIcon
+      cucumberStepIcon,
+      insertStepFromRef,
+      onCucumberInput,
+      onCucumberKeydown,
+      onCucumberBlur,
+      confirmAcItem: _confirmAcItem,
     }
   }
 }).mount('#app')

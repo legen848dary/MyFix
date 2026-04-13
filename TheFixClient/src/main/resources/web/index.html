@@ -2540,10 +2540,22 @@
 
     .cucumber-editor-header {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
+      flex-wrap: wrap;
       justify-content: space-between;
       margin-bottom: 12px;
-      gap: 12px;
+      gap: 8px;
+    }
+
+    .cucumber-editor-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      flex-basis: 100%;
+      margin: 0 0 4px;
+    }
+
+    .cucumber-editor-wrap {
+      position: relative;
     }
 
     .cucumber-editor {
@@ -2566,8 +2578,60 @@
       outline-offset: 2px;
     }
 
+    /* Autocomplete dropdown */
+    .ac-dropdown {
+      z-index: 9999;
+      background: var(--surface-overlay, var(--surface));
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.28);
+      list-style: none;
+      margin: 0;
+      padding: 4px 0;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+
+    .ac-item {
+      display: flex;
+      flex-direction: column;
+      padding: 5px 12px;
+      cursor: pointer;
+      gap: 1px;
+    }
+
+    .ac-item:hover,
+    .ac-item--active {
+      background: var(--brand, #0064d2);
+      color: #fff;
+    }
+
+    .ac-item__category {
+      font-size: 9px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      opacity: 0.65;
+    }
+
+    .ac-item__label {
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
     .cucumber-step-reference {
       margin-top: 0;
+    }
+
+    .cucumber-step-ref-hint {
+      font-size: 10.5px;
+      font-weight: 400;
+      color: var(--text-muted);
+      text-transform: none;
+      letter-spacing: 0;
+      margin-left: 6px;
     }
 
     .cucumber-step-ref-grid {
@@ -2595,9 +2659,22 @@
       gap: 4px;
     }
 
-    .cucumber-step-ref-list li {
+    .cucumber-step-ref-item {
       font-size: 11px;
       color: var(--text-secondary, var(--text-muted));
+      cursor: pointer;
+      border-radius: 3px;
+      padding: 2px 3px;
+      transition: background 0.1s;
+    }
+
+    .cucumber-step-ref-item:hover {
+      background: var(--brand, #0064d2);
+      color: #fff;
+    }
+
+    .cucumber-step-ref-item:hover .mono {
+      background: rgba(255,255,255,0.15);
     }
 
     .cucumber-step-ref-list .mono {

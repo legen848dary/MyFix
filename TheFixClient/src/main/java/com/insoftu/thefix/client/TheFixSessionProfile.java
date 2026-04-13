@@ -146,7 +146,7 @@ record TheFixSessionProfile(
 
     private static String sanitizeSessionTime(String raw, String fallback) {
         String candidate = sanitizeText(raw, fallback).toUpperCase(Locale.US);
-        return candidate.matches("^\\d{2}:\\d{2}:\\d{2}$") ? candidate : fallback;
+        return candidate.matches("^([01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d$") ? candidate : fallback;
     }
 }
 
