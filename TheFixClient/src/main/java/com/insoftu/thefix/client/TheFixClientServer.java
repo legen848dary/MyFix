@@ -49,8 +49,8 @@ final class TheFixClientServer {
 
         router.post("/api/auth/login").handler(ctx -> {
             JsonObject body = bodyJson(ctx);
-            String username = body == null ? null : body.getString("username");
-            String password = body == null ? null : body.getString("password");
+            String username = body.getString("username");
+            String password = body.getString("password");
             Optional<UserSession> session = sessionRegistry.login(username, password);
             if (session.isEmpty()) {
                 ctx.response().setStatusCode(401)

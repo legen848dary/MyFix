@@ -412,7 +412,9 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
         TheFixSessionProfile profile = profileForName(profileName);
         return fixServices.computeIfAbsent(profile.name(), ignored -> {
             TheFixClientFixService service = new TheFixClientFixService(username, config, profile, orderStore);
-            service.loadPersistedOrders(orderStore.load(username, profile.name()));
+            if (orderStore != null) {
+                service.loadPersistedOrders(orderStore.load(username, profile.name()));
+            }
             return service;
         });
     }

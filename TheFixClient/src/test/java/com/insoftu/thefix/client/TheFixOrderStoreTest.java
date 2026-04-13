@@ -125,4 +125,46 @@ class TheFixOrderStoreTest {
         assertTrue(loaded.isEmpty());
         store.close();
     }
+
+    @Test
+    void loadReturnsEmptyArrayWhenStoredJsonIsCorrupted() throws Exception {
+        TheFixOrderStore store = new TheFixOrderStore(tempDir.resolve("orders").resolve("test-orders"), 1);
+        // Write valid data first, then overwrite with garbage via a second store that writes directly.
+        store.persist("trader1", "Default profile", new JsonArray()
+                .add(new JsonObject().put("clOrdId", "ORD-001")));
+
+        // Overwrite with a corrupted payload by persisting a raw non-JSON string via a custom subclass workaround:
+        // We directly replace the row content using a second persist call that stores a broken string.
+        // Since persist() encodes via JsonArray, we corrupt the DB directly via JDBC.
+        java.sql.Connection conn = java.sql.DriverManager.getConnection(
+                "jdbc:h2:file:" + tempDir.resolve("orders").resolve("test-orders").toAbsolutePath()
+                + ";AUTO_SERVER=FALSE;DB_CLOSE_DELAY=0;DATABASE_TO_UPPER=false", "sa", "");
+        try (java.sql.PreparedStatement ps = conn.prepareStatement(
+                "UPDATE user_orders SET orders_json = ? WHERE username = ? AND profile_name = ?")) {
+            ps.setString(1, "NOT VALID JSON {{{");
+            ps.setString(2, "trader1");
+            ps.setString(3, "Default profile");
+            ps.executeUpdate();
+        }
+        conn.close();
+
+        // load() should catch the decode exception and return empty rather than throwing.
+        JsonArray result = store.load("trader1", "Default profile");
+
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
+        store.close();
+    }
+
+    @Test
+    void purgeExpiredDoesNotThrowForNullUsername() {
+        TheFixOrderStore store = new TheFixOrderStore(tempDir.resolve("orders").resolve("test-orders2"), 1);
+
+        // Should return without throwing.
+        store.purgeExpired(null);
+        store.purgeExpired("");
+        store.purgeExpired("   ");
+
+        store.close();
+    }
 }

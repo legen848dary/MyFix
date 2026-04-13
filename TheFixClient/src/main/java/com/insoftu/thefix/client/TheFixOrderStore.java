@@ -104,7 +104,16 @@ final class TheFixOrderStore implements AutoCloseable {
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (resultSet.next()) {
                     String json = resultSet.getString("orders_json");
-                    return json == null ? new JsonArray() : new JsonArray(json);
+                    if (json == null) {
+                        return new JsonArray();
+                    }
+                    try {
+                        return new JsonArray(json);
+                    } catch (Exception decodeException) {
+                        log.warn("Corrupted order snapshot for user={} profile={} — discarding", username, profileName, decodeException);
+                        deleteCorruptedSnapshot(username, profileName);
+                        return new JsonArray();
+                    }
                 }
             }
         } catch (SQLException exception) {
@@ -118,6 +127,9 @@ final class TheFixOrderStore implements AutoCloseable {
      * configured retention window.
      */
     synchronized void purgeExpired(String username) {
+        if (username == null || username.isBlank()) {
+            return;
+        }
         Instant cutoff = Instant.now().minus(retentionDays, ChronoUnit.DAYS);
         try (Connection connection = openConnection();
              PreparedStatement delete = connection.prepareStatement("""
@@ -142,6 +154,19 @@ final class TheFixOrderStore implements AutoCloseable {
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
+
+    private void deleteCorruptedSnapshot(String username, String profileName) {
+        try (Connection connection = openConnection();
+             PreparedStatement delete = connection.prepareStatement("""
+                     DELETE FROM user_orders WHERE username = ? AND profile_name = ?
+                     """)) {
+            delete.setString(1, username.trim());
+            delete.setString(2, profileName.trim());
+            delete.executeUpdate();
+        } catch (SQLException exception) {
+            log.warn("Unable to delete corrupted order snapshot for user={} profile={}", username, profileName, exception);
+        }
+    }
 
     private void initializeSchema() {
         try (Connection connection = openConnection(); Statement statement = connection.createStatement()) {

@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 /**
  * Manages the lifecycle of authenticated user sessions.
@@ -28,6 +29,12 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 final class UserSessionRegistry implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(UserSessionRegistry.class);
+    /**
+     * Allowlist for username path segments: letters (upper/lower), digits, hyphen, underscore.
+     * Prevents path-traversal attacks when a username is used as a filesystem directory name.
+     * Dots, slashes, backslashes, and other special characters are explicitly excluded.
+     */
+    private static final Pattern SAFE_USERNAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_-]{1,64}$");
 
     private final TheFixClientConfig config;
     private final AuthModule authModule;
@@ -56,6 +63,17 @@ final class UserSessionRegistry implements AutoCloseable {
             return Optional.empty();
         }
         AuthenticatedUser user = authenticated.get();
+
+        // Evict any expired sessions for this user to prevent accumulation of stale state.
+        sessions.entrySet().removeIf(entry -> {
+            UserSession s = entry.getValue();
+            if (s.user().username().equals(user.username()) && s.isExpired()) {
+                closeQuietly(s);
+                log.debug("user={} evicted stale expired session token={}", user.username(), entry.getKey());
+                return true;
+            }
+            return false;
+        });
 
         // Reuse any existing non-expired session for this user so the FIX
         // state (open connections, order blotter) survives a page refresh / re-login.
@@ -134,7 +152,18 @@ final class UserSessionRegistry implements AutoCloseable {
     // -------------------------------------------------------------------------
 
     private TheFixClientWorkbenchState createWorkbenchState(String username) {
-        Path userBase = Path.of(config.quickFixLogDir(), "users", username).toAbsolutePath().normalize();
+        if (!SAFE_USERNAME_PATTERN.matcher(username).matches()) {
+            throw new IllegalArgumentException(
+                    "Username '" + username + "' contains characters not allowed in filesystem paths. " +
+                    "Allowed: a-z, A-Z, 0-9, hyphen, underscore (max 64 chars).");
+        }
+        Path baseDir = Path.of(config.quickFixLogDir(), "users").toAbsolutePath().normalize();
+        Path userBase = baseDir.resolve(username).normalize();
+        // Belt-and-suspenders: verify the resolved path is still within the expected parent.
+        if (!userBase.startsWith(baseDir)) {
+            throw new IllegalArgumentException(
+                    "Resolved user directory escapes the expected base path for username '" + username + "'.");
+        }
         TheFixClientConfig userConfig = config.withQuickFixLogDir(userBase.toString());
         TheFixSessionProfileStore profileStore = new TheFixSessionProfileStore(userConfig);
         TheFixMessageTemplateStore templateStore = new TheFixMessageTemplateStore(userConfig);

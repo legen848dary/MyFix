@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class UserSessionRegistryTest {
@@ -123,6 +124,77 @@ class UserSessionRegistryTest {
 
         assertFalse(registry.validate(token).isPresent());
         assertEquals(0, registry.activeSessions());
+    }
+
+    /**
+     * Verifies that usernames containing path-traversal characters (e.g. {@code ..}, {@code /})
+     * are rejected when creating a new workbench state directory, preventing directory-escape attacks.
+     * The test uses a custom AuthModule so the invalid username passes authentication.
+     */
+    @Test
+    void loginRejectsPathTraversalUsername() {
+        TheFixClientConfig config = new TheFixClientConfig(
+                "0.0.0.0", 0, "localhost", 9880,
+                "FIX.4.4", "THEFIX_TRDR01", "LLEXSIM",
+                "FIX.4.4", 30, 5, 25,
+                tempDir.toString(), false, 480, 1
+        );
+        // Craft an AuthModule that accepts any non-blank credentials to let us reach createWorkbenchState().
+        AuthModule permissiveModule = new AuthModule() {
+            @Override
+            public Optional<AuthenticatedUser> authenticate(String username, String password) {
+                if (username != null && !username.isBlank()) {
+                    return Optional.of(new AuthenticatedUser(username, username, "TRADER"));
+                }
+                return Optional.empty();
+            }
+            @Override
+            public String name() { return "permissive"; }
+        };
+
+        UserSessionRegistry registry = new UserSessionRegistry(config, permissiveModule);
+
+        // Path-traversal sequences must be rejected.
+        assertThrows(IllegalArgumentException.class, () -> registry.login("../admin", "x"));
+        assertThrows(IllegalArgumentException.class, () -> registry.login("../../etc/passwd", "x"));
+        assertThrows(IllegalArgumentException.class, () -> registry.login("sub/dir", "x")); // slash not allowed
+        assertThrows(IllegalArgumentException.class, () -> registry.login("user name", "x")); // space not allowed
+        assertThrows(IllegalArgumentException.class, () -> registry.login("user@host", "x")); // @ not allowed
+
+        // Uppercase letters are safe as directory names and must be accepted.
+        assertFalse(registry.login("ADMIN", "x").isEmpty());
+        assertFalse(registry.login("Trader1", "x").isEmpty());
+
+        registry.close();
+    }
+
+    /**
+     * A user that logs in a second time after the first session has been evicted (expired) should
+     * get a fresh session rather than having stale tokens accumulate.
+     */
+    @Test
+    void expiredSessionIsEvictedAndNewSessionCreatedOnReLogin() {
+        TheFixClientConfig config = new TheFixClientConfig(
+                "0.0.0.0", 0, "localhost", 9880,
+                "FIX.4.4", "THEFIX_TRDR01", "LLEXSIM",
+                "FIX.4.4", 30, 5, 25,
+                tempDir.toString(), false,
+                0,  // zero-minute timeout → sessions expire immediately
+                1
+        );
+        UserSessionRegistry registry = new UserSessionRegistry(config, new DemoAuthModule());
+
+        UserSession first = registry.login("trader1", "trader1").orElseThrow();
+        // The zero-minute timeout means the first session is already expired.
+        assertTrue(first.isExpired(), "Expected session to have expired immediately with 0-minute timeout");
+
+        // A second login should evict the first (expired) session and produce a new token.
+        UserSession second = registry.login("trader1", "trader1").orElseThrow();
+        assertFalse(second.token().equals(first.token()),
+                "Expected a new token after the original session expired");
+        // There must be exactly one session — no stale accumulation.
+        assertEquals(1, registry.activeSessions());
+        registry.close();
     }
 
     private UserSessionRegistry createRegistry() {
