@@ -8,7 +8,6 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -110,8 +109,8 @@ class TheFixOrderStoreTest {
         JsonArray r1 = store.load(null, "Default profile");
         JsonArray r2 = store.load("trader1", null);
 
-        assertFalse(r1 == null);
-        assertFalse(r2 == null);
+        assertNotNull(r1);
+        assertNotNull(r2);
         store.close();
     }
 

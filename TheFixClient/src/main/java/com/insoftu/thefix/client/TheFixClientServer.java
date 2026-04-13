@@ -65,7 +65,7 @@ final class TheFixClientServer {
                     .put("displayName", s.user().displayName())
                     .put("role", s.user().role())
                     .put("expiresAt", s.expiresAt().toString())
-                    .put("authModule", config.sessionTimeoutMinutes()));
+                    .put("sessionTimeoutMinutes", config.sessionTimeoutMinutes()));
         });
 
         // ── Auth middleware: applied to all /api/* except the two above ───────

@@ -90,6 +90,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
             Map.entry("BF", "User Response")
     );
 
+    private final String username;
     private final TheFixClientConfig config;
     private final TheFixSessionProfile runtimeProfile;
     private final TheFixOrderStore orderStore;
@@ -125,10 +126,15 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     private long autoFlowRemaining;
 
     TheFixClientFixService(TheFixClientConfig config, TheFixSessionProfile runtimeProfile) {
-        this(config, runtimeProfile, null);
+        this(config.senderCompId(), config, runtimeProfile, null);
     }
 
     TheFixClientFixService(TheFixClientConfig config, TheFixSessionProfile runtimeProfile, TheFixOrderStore orderStore) {
+        this(config.senderCompId(), config, runtimeProfile, orderStore);
+    }
+
+    TheFixClientFixService(String username, TheFixClientConfig config, TheFixSessionProfile runtimeProfile, TheFixOrderStore orderStore) {
+        this.username = username;
         this.config = config;
         this.runtimeProfile = runtimeProfile;
         this.orderStore = orderStore;
@@ -715,7 +721,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         if (orderStore == null) {
             return;
         }
-        orderStore.persist(config.senderCompId(), runtimeProfile.name(), recentOrdersJson());
+        orderStore.persist(username, runtimeProfile.name(), recentOrdersJson());
     }
 
     private void stopAutoFlowInternal(boolean addEvent) {

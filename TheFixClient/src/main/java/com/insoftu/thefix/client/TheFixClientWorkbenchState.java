@@ -76,6 +76,7 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
     private static final Set<String> VALID_BULK_MODE_CODES = Set.of("FIXED_RATE", "BURST");
     private static final TheFixFixDictionaryCatalog FIX_DICTIONARY_CATALOG = new TheFixFixDictionaryCatalog();
 
+    private final String username;
     private final TheFixClientConfig config;
     private final TheFixSessionProfileStore profileStore;
     private final TheFixMessageTemplateStore templateStore;
@@ -85,18 +86,23 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
     private int pulseChecks;
 
     TheFixClientWorkbenchState(TheFixClientConfig config) {
-        this(config, new TheFixSessionProfileStore(config), new TheFixMessageTemplateStore(config), new TheFixOrderStore(config));
+        this(config.senderCompId(), config, new TheFixSessionProfileStore(config), new TheFixMessageTemplateStore(config), new TheFixOrderStore(config));
     }
 
     TheFixClientWorkbenchState(TheFixClientConfig config, TheFixSessionProfileStore profileStore) {
-        this(config, profileStore, new TheFixMessageTemplateStore(config), new TheFixOrderStore(config));
+        this(config.senderCompId(), config, profileStore, new TheFixMessageTemplateStore(config), new TheFixOrderStore(config));
     }
 
     TheFixClientWorkbenchState(TheFixClientConfig config, TheFixSessionProfileStore profileStore, TheFixMessageTemplateStore templateStore) {
-        this(config, profileStore, templateStore, new TheFixOrderStore(config));
+        this(config.senderCompId(), config, profileStore, templateStore, new TheFixOrderStore(config));
     }
 
     TheFixClientWorkbenchState(TheFixClientConfig config, TheFixSessionProfileStore profileStore, TheFixMessageTemplateStore templateStore, TheFixOrderStore orderStore) {
+        this(config.senderCompId(), config, profileStore, templateStore, orderStore);
+    }
+
+    TheFixClientWorkbenchState(String username, TheFixClientConfig config, TheFixSessionProfileStore profileStore, TheFixMessageTemplateStore templateStore, TheFixOrderStore orderStore) {
+        this.username = username;
         this.config = config;
         this.profileStore = profileStore;
         this.templateStore = templateStore;
@@ -405,8 +411,8 @@ final class TheFixClientWorkbenchState implements AutoCloseable {
     private TheFixClientFixService serviceForProfile(String profileName) {
         TheFixSessionProfile profile = profileForName(profileName);
         return fixServices.computeIfAbsent(profile.name(), ignored -> {
-            TheFixClientFixService service = new TheFixClientFixService(config, profile, orderStore);
-            service.loadPersistedOrders(orderStore.load(config.senderCompId(), profile.name()));
+            TheFixClientFixService service = new TheFixClientFixService(username, config, profile, orderStore);
+            service.loadPersistedOrders(orderStore.load(username, profile.name()));
             return service;
         });
     }

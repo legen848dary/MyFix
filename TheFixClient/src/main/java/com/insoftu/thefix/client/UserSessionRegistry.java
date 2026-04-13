@@ -139,7 +139,7 @@ final class UserSessionRegistry implements AutoCloseable {
         TheFixSessionProfileStore profileStore = new TheFixSessionProfileStore(userConfig);
         TheFixMessageTemplateStore templateStore = new TheFixMessageTemplateStore(userConfig);
         TheFixOrderStore orderStore = new TheFixOrderStore(userConfig);
-        return new TheFixClientWorkbenchState(userConfig, profileStore, templateStore, orderStore);
+        return new TheFixClientWorkbenchState(username, userConfig, profileStore, templateStore, orderStore);
     }
 
     private void evict(String token, UserSession session) {
