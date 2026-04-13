@@ -51,7 +51,15 @@ final class TheFixClientServer {
             JsonObject body = bodyJson(ctx);
             String username = body.getString("username");
             String password = body.getString("password");
-            Optional<UserSession> session = sessionRegistry.login(username, password);
+            Optional<UserSession> session;
+            try {
+                session = sessionRegistry.login(username, password);
+            } catch (IllegalArgumentException e) {
+                ctx.response().setStatusCode(400)
+                        .putHeader("content-type", "application/json")
+                        .end(new JsonObject().put("error", e.getMessage()).encode());
+                return;
+            }
             if (session.isEmpty()) {
                 ctx.response().setStatusCode(401)
                         .putHeader("content-type", "application/json")

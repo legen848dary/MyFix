@@ -197,6 +197,46 @@ class UserSessionRegistryTest {
         registry.close();
     }
 
+    /**
+     * After logout, a second login for the same user must produce a new token
+     * rather than seeing the evicted mapping as "still active".
+     */
+    @Test
+    void afterLogoutReLoginCreatesNewSession() {
+        UserSessionRegistry registry = createRegistry();
+        UserSession first = registry.login("trader1", "trader1").orElseThrow();
+
+        registry.logout(first.token());
+
+        UserSession second = registry.login("trader1", "trader1").orElseThrow();
+        // Logout must have cleared the username index so the new login creates a fresh token.
+        assertFalse(first.token().equals(second.token()),
+                "Expected a fresh token after logout");
+        assertEquals(1, registry.activeSessions());
+        registry.close();
+    }
+
+    /**
+     * Verifies the boundary condition in {@code isExpired()}: a session whose
+     * {@code expiresAt} equals exactly {@code Instant.now()} must be treated as expired
+     * (i.e. {@code !now.isBefore(expiresAt)} rather than {@code now.isAfter(expiresAt)}).
+     */
+    @Test
+    void sessionExpiredAtBoundaryIsConsideredExpired() {
+        // A zero-minute timeout creates sessions that expire at (or before) now.
+        TheFixClientConfig config = new TheFixClientConfig(
+                "0.0.0.0", 0, "localhost", 9880,
+                "FIX.4.4", "THEFIX_TRDR01", "LLEXSIM",
+                "FIX.4.4", 30, 5, 25,
+                tempDir.toString(), false, 0, 1
+        );
+        UserSessionRegistry registry = new UserSessionRegistry(config, new DemoAuthModule());
+
+        UserSession session = registry.login("trader1", "trader1").orElseThrow();
+        assertTrue(session.isExpired(), "Zero-minute session should be expired immediately");
+        registry.close();
+    }
+
     private UserSessionRegistry createRegistry() {
         TheFixClientConfig config = new TheFixClientConfig(
                 "0.0.0.0", 0, "localhost", 9880,

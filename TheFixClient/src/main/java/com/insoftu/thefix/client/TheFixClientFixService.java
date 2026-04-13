@@ -61,6 +61,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -103,6 +104,16 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     private final AtomicLong sendFailureCount = new AtomicLong();
     private final ScheduledExecutorService autoFlowExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread thread = new Thread(r, "thefixclient-auto-flow");
+        thread.setDaemon(true);
+        return thread;
+    });
+    /**
+     * Single-threaded executor that handles all order-store JDBC writes.
+     * Decouples blocking DB I/O from the Vert.x event-loop threads that invoke
+     * send/amend/cancel handlers, preventing event-loop stalls under slow disk conditions.
+     */
+    private final ExecutorService persistenceExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "thefixclient-persist");
         thread.setDaemon(true);
         return thread;
     });
@@ -466,9 +477,14 @@ final class TheFixClientFixService implements Application, AutoCloseable {
     public void close() {
         disconnect();
         synchronized (this) {
-            persistOrders();
+            // Write the final snapshot synchronously before the executor is shut down so
+            // we guarantee the latest blotter state is persisted on service close.
+            if (orderStore != null) {
+                orderStore.persist(username, runtimeProfile.name(), recentOrdersJson());
+            }
         }
         autoFlowExecutor.shutdownNow();
+        persistenceExecutor.shutdown();
         try {
             if (!autoFlowExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
                 log.warn("Timed out waiting for auto-flow executor shutdown for profile {}", runtimeProfile.name());
@@ -476,6 +492,14 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         } catch (InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
             log.warn("Interrupted while waiting for auto-flow executor shutdown for profile {}", runtimeProfile.name(), interruptedException);
+        }
+        try {
+            if (!persistenceExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                log.warn("Timed out waiting for persistence executor shutdown for profile {}", runtimeProfile.name());
+            }
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            log.warn("Interrupted while waiting for persistence executor shutdown for profile {}", runtimeProfile.name(), interruptedException);
         }
     }
 
@@ -721,7 +745,10 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         if (orderStore == null) {
             return;
         }
-        orderStore.persist(username, runtimeProfile.name(), recentOrdersJson());
+        // Capture the snapshot under the caller's lock, then write it on the persistence thread
+        // so that blocking JDBC I/O does not stall Vert.x event-loop threads.
+        JsonArray snapshot = recentOrdersJson();
+        persistenceExecutor.submit(() -> orderStore.persist(username, runtimeProfile.name(), snapshot));
     }
 
     private void stopAutoFlowInternal(boolean addEvent) {
@@ -1052,6 +1079,28 @@ final class TheFixClientFixService implements Application, AutoCloseable {
                           String currency,
                           List<TheFixTagEntry> additionalTags,
                           boolean autoFlow) {
+            this(clOrdId, symbol, side, messageType, messageTypeCode,
+                    quantity, limitPrice, stopPrice, timeInForce, orderType, priceType,
+                    region, market, currency, additionalTags, autoFlow, Instant.now());
+        }
+
+        private OrderView(String clOrdId,
+                          String symbol,
+                          String side,
+                          String messageType,
+                          String messageTypeCode,
+                          int quantity,
+                          double limitPrice,
+                          double stopPrice,
+                          String timeInForce,
+                          String orderType,
+                          String priceType,
+                          String region,
+                          String market,
+                          String currency,
+                          List<TheFixTagEntry> additionalTags,
+                          boolean autoFlow,
+                          Instant createdAt) {
             this.clOrdId = clOrdId;
             this.symbol = symbol;
             this.side = side;
@@ -1068,7 +1117,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
             this.currency = currency;
             this.additionalTags = additionalTags == null ? List.of() : List.copyOf(additionalTags);
             this.autoFlow = autoFlow;
-            this.createdAt = Instant.now();
+            this.createdAt = createdAt;
             this.status = "Pending";
             this.execType = "Pending";
             this.note = autoFlow ? "Auto flow " + messageType : messageType;
@@ -1217,6 +1266,7 @@ final class TheFixClientFixService implements Application, AutoCloseable {
         JsonObject toJson() {
             return new JsonObject()
                     .put("time", EVENT_TIME_FORMAT.format(createdAt))
+                    .put("createdAtMs", createdAt.toEpochMilli())
                     .put("clOrdId", clOrdId)
                     .put("messageType", messageType)
                     .put("messageTypeCode", messageTypeCode)
@@ -1269,10 +1319,12 @@ final class TheFixClientFixService implements Application, AutoCloseable {
             String market = json.getString("market", "XNAS");
             String currency = json.getString("currency", "USD");
             boolean autoFlow = Boolean.TRUE.equals(json.getBoolean("autoFlow", false));
+            Long createdAtMs = json.getLong("createdAtMs");
+            Instant createdAt = createdAtMs != null ? Instant.ofEpochMilli(createdAtMs) : Instant.now();
 
             OrderView view = new OrderView(clOrdId, symbol, side, messageType, messageTypeCode,
                     quantity, limitPrice, stopPrice, timeInForce, orderType, priceType,
-                    region, market, currency, List.of(), autoFlow);
+                    region, market, currency, List.of(), autoFlow, createdAt);
 
             view.status = json.getString("status", "Sent");
             view.execType = json.getString("execType", "Pending");

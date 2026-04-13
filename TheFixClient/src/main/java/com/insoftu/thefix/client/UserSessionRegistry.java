@@ -39,7 +39,14 @@ final class UserSessionRegistry implements AutoCloseable {
     private final TheFixClientConfig config;
     private final AuthModule authModule;
     private final Duration sessionTimeout;
+    /** Primary store: token → session. */
     private final ConcurrentHashMap<String, UserSession> sessions = new ConcurrentHashMap<>();
+    /**
+     * Secondary index: username → current active token.
+     * Used to make session create/refresh atomic per user — prevents concurrent logins
+     * for the same user from creating duplicate workbench states.
+     */
+    private final ConcurrentHashMap<String, String> usernameToToken = new ConcurrentHashMap<>();
 
     UserSessionRegistry(TheFixClientConfig config, AuthModule authModule) {
         this.config = config;
@@ -64,34 +71,40 @@ final class UserSessionRegistry implements AutoCloseable {
         }
         AuthenticatedUser user = authenticated.get();
 
-        // Evict any expired sessions for this user to prevent accumulation of stale state.
-        sessions.entrySet().removeIf(entry -> {
-            UserSession s = entry.getValue();
-            if (s.user().username().equals(user.username()) && s.isExpired()) {
-                closeQuietly(s);
-                log.debug("user={} evicted stale expired session token={}", user.username(), entry.getKey());
-                return true;
+        // Use compute() on the username key to make session create/refresh atomic per user.
+        // This prevents two concurrent login calls for the same username from each creating
+        // their own workbench state (and thus leaking FIX connections and order blotters).
+        UserSession[] holder = new UserSession[1];
+        usernameToToken.compute(user.username(), (uname, existingToken) -> {
+            if (existingToken != null) {
+                UserSession existing = sessions.get(existingToken);
+                if (existing != null && !existing.isExpired()) {
+                    // Refresh the live session — re-login from a new browser tab, etc.
+                    UserSession refreshed = existing.withExpiresAt(nextExpiry());
+                    sessions.put(existingToken, refreshed);
+                    holder[0] = refreshed;
+                    log.info("auth module={} user={} re-login, session refreshed token={}", authModule.name(), uname, existingToken);
+                    return existingToken;
+                }
+                // Prior session is gone or expired — evict it.
+                if (existing != null) {
+                    closeQuietly(existing);
+                    log.debug("user={} evicted stale expired session token={}", uname, existingToken);
+                }
+                sessions.remove(existingToken);
             }
-            return false;
+
+            // No live session: create a fresh one.
+            String newToken = UUID.randomUUID().toString();
+            TheFixClientWorkbenchState state = createWorkbenchState(uname);
+            UserSession session = new UserSession(newToken, user, state, nextExpiry());
+            sessions.put(newToken, session);
+            holder[0] = session;
+            log.info("auth module={} user={} login ok token={}", authModule.name(), uname, newToken);
+            return newToken;
         });
 
-        // Reuse any existing non-expired session for this user so the FIX
-        // state (open connections, order blotter) survives a page refresh / re-login.
-        for (UserSession existing : sessions.values()) {
-            if (existing.user().username().equals(user.username()) && !existing.isExpired()) {
-                UserSession refreshed = existing.withExpiresAt(nextExpiry());
-                sessions.put(refreshed.token(), refreshed);
-                log.info("auth module={} user={} re-login, session refreshed token={}", authModule.name(), user.username(), refreshed.token());
-                return Optional.of(refreshed);
-            }
-        }
-
-        String token = UUID.randomUUID().toString();
-        TheFixClientWorkbenchState state = createWorkbenchState(user.username());
-        UserSession session = new UserSession(token, user, state, nextExpiry());
-        sessions.put(token, session);
-        log.info("auth module={} user={} login ok token={}", authModule.name(), user.username(), token);
-        return Optional.of(session);
+        return Optional.ofNullable(holder[0]);
     }
 
     /**
@@ -129,6 +142,9 @@ final class UserSessionRegistry implements AutoCloseable {
         if (session == null) {
             return false;
         }
+        // Remove from the username index only if this token is still the registered one
+        // (a concurrent re-login may have already replaced it with a new token).
+        usernameToToken.remove(session.user().username(), token);
         closeQuietly(session);
         log.info("user={} logged out token={}", session.user().username(), token);
         return true;
@@ -145,6 +161,7 @@ final class UserSessionRegistry implements AutoCloseable {
             closeQuietly(session);
         }
         sessions.clear();
+        usernameToToken.clear();
     }
 
     // -------------------------------------------------------------------------

@@ -173,6 +173,42 @@ class TheFixClientServerRoutingTest {
         assertEquals(404, missingAsset.statusCode());
     }
 
+    @Test
+    void loginWithUnsafeUsernameReturnsBadRequest() throws Exception {
+        Path logDir = Files.createTempDirectory("thefixclient-routing-test-unsafe");
+        // Use a permissive auth module that accepts any non-blank username so the server
+        // reaches createWorkbenchState() where the path-traversal check fires, returning HTTP 400.
+        UserSessionRegistry permissiveRegistry = new UserSessionRegistry(
+                new TheFixClientConfig("127.0.0.1", 0, "localhost", 9880,
+                        "FIX.4.4", "THEFIX_TRDR01", "LLEXSIM",
+                        "FIX.4.4", 30, 5, 25, logDir.toString(), false, 480, 1),
+                new AuthModule() {
+                    @Override
+                    public java.util.Optional<AuthenticatedUser> authenticate(String u, String p) {
+                        if (u != null && !u.isBlank()) {
+                            return java.util.Optional.of(new AuthenticatedUser(u, u, "TRADER"));
+                        }
+                        return java.util.Optional.empty();
+                    }
+                    @Override public String name() { return "permissive"; }
+                }
+        );
+        server = new TheFixClientServer(
+                new TheFixClientConfig("127.0.0.1", 0, "localhost", 9880,
+                        "FIX.4.4", "THEFIX_TRDR01", "LLEXSIM",
+                        "FIX.4.4", 30, 5, 25, logDir.toString(), false, 480, 1),
+                permissiveRegistry
+        );
+        server.start();
+
+        HttpClient client = HttpClient.newHttpClient();
+        HttpResponse<String> response = post(client, "/api/auth/login",
+                "{\"username\":\"../evil\",\"password\":\"x\"}", null);
+
+        assertEquals(400, response.statusCode());
+        assertTrue(response.body().contains("error"));
+    }
+
     private HttpResponse<String> send(HttpClient client, String path, String token) throws Exception {
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create("http://127.0.0.1:" + server.actualPort() + path))
