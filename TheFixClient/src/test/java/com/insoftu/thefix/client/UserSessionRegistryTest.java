@@ -237,6 +237,14 @@ class UserSessionRegistryTest {
         registry.close();
     }
 
+    @Test
+    void maskTokenForLogHidesSensitiveValues() {
+        assertEquals("<null>", UserSessionRegistry.maskTokenForLog(null));
+        assertEquals("<empty>", UserSessionRegistry.maskTokenForLog("   "));
+        assertEquals("***", UserSessionRegistry.maskTokenForLog("12345678"));
+        assertEquals("1234...cdef", UserSessionRegistry.maskTokenForLog("1234567890abcdef"));
+    }
+
     private UserSessionRegistry createRegistry() {
         TheFixClientConfig config = new TheFixClientConfig(
                 "0.0.0.0", 0, "localhost", 9880,
