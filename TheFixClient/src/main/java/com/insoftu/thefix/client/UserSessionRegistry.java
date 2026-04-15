@@ -83,13 +83,16 @@ final class UserSessionRegistry implements AutoCloseable {
                     UserSession refreshed = existing.withExpiresAt(nextExpiry());
                     sessions.put(existingToken, refreshed);
                     holder[0] = refreshed;
-                    log.info("auth module={} user={} re-login, session refreshed token={}", authModule.name(), uname, existingToken);
+                    log.info("auth module={} user={} re-login, session refreshed token={}",
+                            authModule.name(),
+                            uname,
+                            maskTokenForLog(existingToken));
                     return existingToken;
                 }
                 // Prior session is gone or expired — evict it.
                 if (existing != null) {
                     closeQuietly(existing);
-                    log.debug("user={} evicted stale expired session token={}", uname, existingToken);
+                    log.debug("user={} evicted stale expired session token={}", uname, maskTokenForLog(existingToken));
                 }
                 sessions.remove(existingToken);
             }
@@ -100,7 +103,7 @@ final class UserSessionRegistry implements AutoCloseable {
             UserSession session = new UserSession(newToken, user, state, nextExpiry());
             sessions.put(newToken, session);
             holder[0] = session;
-            log.info("auth module={} user={} login ok token={}", authModule.name(), uname, newToken);
+            log.info("auth module={} user={} login ok token={}", authModule.name(), uname, maskTokenForLog(newToken));
             return newToken;
         });
 
@@ -146,7 +149,7 @@ final class UserSessionRegistry implements AutoCloseable {
         // (a concurrent re-login may have already replaced it with a new token).
         usernameToToken.remove(session.user().username(), token);
         closeQuietly(session);
-        log.info("user={} logged out token={}", session.user().username(), token);
+        log.info("user={} logged out token={}", session.user().username(), maskTokenForLog(token));
         return true;
     }
 
@@ -191,7 +194,7 @@ final class UserSessionRegistry implements AutoCloseable {
     private void evict(String token, UserSession session) {
         sessions.remove(token);
         closeQuietly(session);
-        log.debug("user={} session expired token={}", session.user().username(), token);
+        log.debug("user={} session expired token={}", session.user().username(), maskTokenForLog(token));
     }
 
     private static void closeQuietly(UserSession session) {
@@ -204,5 +207,19 @@ final class UserSessionRegistry implements AutoCloseable {
 
     private Instant nextExpiry() {
         return Instant.now().plus(sessionTimeout);
+    }
+
+    static String maskTokenForLog(String token) {
+        if (token == null) {
+            return "<null>";
+        }
+        String trimmed = token.trim();
+        if (trimmed.isEmpty()) {
+            return "<empty>";
+        }
+        if (trimmed.length() <= 8) {
+            return "***";
+        }
+        return trimmed.substring(0, 4) + "..." + trimmed.substring(trimmed.length() - 4);
     }
 }
