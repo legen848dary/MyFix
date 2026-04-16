@@ -53,6 +53,8 @@ services:
       - "${WEB_STACK_CLIENT_PORT:-8081}:8081"
     volumes:
       - ${WEB_STACK_CLIENT_LOG_DIR:-./TheFixClient/logs}:/app/logs
+    tmpfs:
+      - /app/logs/thefixclient/quickfixj
     environment:
       THEFIX_CLIENT_PORT: "8081"
       THEFIX_FIX_HOST: llexsimulator
