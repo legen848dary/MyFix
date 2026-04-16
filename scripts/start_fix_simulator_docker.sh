@@ -94,13 +94,18 @@ mkdir -p "${CONFIG_DIR}" "${LOG_DIR}"
 
 # ── Normalise network mode ────────────────────────────────────────────────────
 # 'NAT' is the Windows Docker Desktop alias for bridge networking.
-if [[ "${NETWORK_MODE,,}" == "nat" ]]; then
+# Use tr for case-folding — compatible with Bash 3.x (macOS default shell).
+_NETWORK_MODE_LOWER="$(printf '%s' "${NETWORK_MODE}" | tr '[:upper:]' '[:lower:]')"
+if [[ "${_NETWORK_MODE_LOWER}" == "nat" ]]; then
     NETWORK_MODE="bridge"
+else
+    NETWORK_MODE="${_NETWORK_MODE_LOWER}"
 fi
 if [[ "${NETWORK_MODE}" != "bridge" && "${NETWORK_MODE}" != "host" && "${NETWORK_MODE}" != "none" ]]; then
     error "Invalid --network-mode '${NETWORK_MODE}'. Must be one of: bridge, host, none, NAT."
     exit 1
 fi
+unset _NETWORK_MODE_LOWER
 
 # ── Already-running check ─────────────────────────────────────────────────────
 if [[ "$(docker inspect -f '{{.State.Running}}' "${CONTAINER_NAME}" 2>/dev/null || echo 'false')" == "true" ]]; then
@@ -118,6 +123,18 @@ if [[ "${NETWORK_MODE}" == "bridge" ]]; then
             exit 1
         fi
     done
+fi
+
+# ── Validate config directory ─────────────────────────────────────────────────
+# The bind-mount overlays the image's baked-in /app/config. If the directory
+# exists but does not contain simulator.properties the container will start
+# without any config, so we error here with a clear message rather than
+# letting the JVM fail silently at startup.
+if [[ ! -f "${CONFIG_DIR}/simulator.properties" ]]; then
+    error "simulator.properties not found in --config-dir '${CONFIG_DIR}'."
+    error "Expected: ${CONFIG_DIR}/simulator.properties"
+    error "Either create the file or omit --config-dir to use the bundled defaults."
+    exit 1
 fi
 
 # ── Build ─────────────────────────────────────────────────────────────────────
@@ -150,6 +167,8 @@ DOCKER_RUN_ARGS=(
 -XX:+AlwaysPreTouch \
 -XX:+DisableExplicitGC \
 -XX:+PerfDisableSharedMem \
+-Dweb.port=${SIM_WEB_PORT} \
+-Dfix.port=${SIM_FIX_PORT} \
 -Daeron.dir=/dev/shm/aeron-llexsim \
 -Daeron.ipc.term.buffer.length=8388608 \
 -Daeron.threading.mode=SHARED \
@@ -159,7 +178,7 @@ DOCKER_RUN_ARGS=(
 --add-opens java.base/sun.nio.ch=ALL-UNNAMED \
 --add-opens java.base/java.nio=ALL-UNNAMED \
 --add-opens java.base/java.lang=ALL-UNNAMED"
-    --health-cmd "curl -sf http://localhost:8080/api/health"  # container-internal port, always 8080
+    --health-cmd "curl -sf http://localhost:${SIM_WEB_PORT}/api/health"  # container-internal port (set via -Dweb.port)
     --health-interval 30s
     --health-timeout 5s
     --health-retries 3
@@ -171,10 +190,11 @@ if [[ "${NETWORK_MODE}" == "host" ]]; then
 elif [[ "${NETWORK_MODE}" == "none" ]]; then
     DOCKER_RUN_ARGS+=(--network none)
 else
-    # bridge: expose host ports
+    # bridge: -Dweb.port / -Dfix.port make the container listen on the user-chosen
+    # ports, so we publish them symmetrically (no fixed 8080/9880 remapping needed).
     DOCKER_RUN_ARGS+=(
-        --publish "${SIM_WEB_PORT}:8080"
-        --publish "${SIM_FIX_PORT}:9880"
+        --publish "${SIM_WEB_PORT}:${SIM_WEB_PORT}"
+        --publish "${SIM_FIX_PORT}:${SIM_FIX_PORT}"
     )
 fi
 
@@ -192,12 +212,7 @@ echo ""
 success "TheFixSimulator container is running."
 echo -e "  ${BOLD}Container${RESET}    → ${CONTAINER_NAME}"
 echo -e "  ${BOLD}Network Mode${RESET} → ${NETWORK_MODE}"
-if [[ "${NETWORK_MODE}" != "host" ]]; then
-    echo -e "  ${BOLD}Web UI${RESET}       → http://localhost:${SIM_WEB_PORT}"
-    echo -e "  ${BOLD}FIX Acceptor${RESET} → tcp://localhost:${SIM_FIX_PORT}"
-else
-    echo -e "  ${BOLD}Web UI${RESET}       → http://localhost:8080  (host network)"
-    echo -e "  ${BOLD}FIX Acceptor${RESET} → tcp://localhost:9880   (host network)"
-fi
+echo -e "  ${BOLD}Web UI${RESET}       → http://localhost:${SIM_WEB_PORT}"
+echo -e "  ${BOLD}FIX Acceptor${RESET} → tcp://localhost:${SIM_FIX_PORT}"
 echo -e "  ${BOLD}Logs${RESET}         → ${LOG_DIR}"
 echo -e "  ${BOLD}Docker Logs${RESET}  → docker logs ${CONTAINER_NAME} -f"

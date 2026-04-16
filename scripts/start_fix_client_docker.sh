@@ -95,13 +95,18 @@ mkdir -p "${LOG_DIR}"
 
 # ── Normalise network mode ────────────────────────────────────────────────────
 # 'NAT' is the Windows Docker Desktop alias for bridge networking.
-if [[ "${NETWORK_MODE,,}" == "nat" ]]; then
+# Use tr for case-folding — compatible with Bash 3.x (macOS default shell).
+_NETWORK_MODE_LOWER="$(printf '%s' "${NETWORK_MODE}" | tr '[:upper:]' '[:lower:]')"
+if [[ "${_NETWORK_MODE_LOWER}" == "nat" ]]; then
     NETWORK_MODE="bridge"
+else
+    NETWORK_MODE="${_NETWORK_MODE_LOWER}"
 fi
 if [[ "${NETWORK_MODE}" != "bridge" && "${NETWORK_MODE}" != "host" && "${NETWORK_MODE}" != "none" ]]; then
     error "Invalid --network-mode '${NETWORK_MODE}'. Must be one of: bridge, host, none, NAT."
     exit 1
 fi
+unset _NETWORK_MODE_LOWER
 
 # ── Already-running check ─────────────────────────────────────────────────────
 if [[ "$(docker inspect -f '{{.State.Running}}' "${CONTAINER_NAME}" 2>/dev/null || echo 'false')" == "true" ]]; then
@@ -140,13 +145,13 @@ DOCKER_RUN_ARGS=(
     --name "${CONTAINER_NAME}"
     --restart unless-stopped
     --volume "${LOG_DIR}:/app/logs"
-    --env "THEFIX_CLIENT_PORT=8081"
+    --env "THEFIX_CLIENT_PORT=${CLIENT_PORT}"
     --env "THEFIX_FIX_HOST=${FIX_HOST}"
     --env "THEFIX_FIX_PORT=${FIX_PORT}"
     --env "THEFIX_FIX_LOG_DIR=/app/logs/thefixclient/quickfixj"
     --env "THEFIX_FIX_RAW_LOGGING_ENABLED=${RAW_LOGGING}"
     --env "JAVA_OPTS=-Xms${HEAP_XMS} -Xmx${HEAP_XMX}"
-    --health-cmd "curl -sf http://localhost:8081/api/health"  # container-internal port, always 8081
+    --health-cmd "curl -sf http://localhost:${CLIENT_PORT}/api/health"  # container-internal port (set via THEFIX_CLIENT_PORT)
     --health-interval 30s
     --health-timeout 5s
     --health-retries 3
@@ -158,8 +163,9 @@ if [[ "${NETWORK_MODE}" == "host" ]]; then
 elif [[ "${NETWORK_MODE}" == "none" ]]; then
     DOCKER_RUN_ARGS+=(--network none)
 else
-    # bridge: expose host port
-    DOCKER_RUN_ARGS+=(--publish "${CLIENT_PORT}:8081")
+    # bridge: THEFIX_CLIENT_PORT makes the container listen on the user-chosen
+    # port, so we publish it symmetrically.
+    DOCKER_RUN_ARGS+=(--publish "${CLIENT_PORT}:${CLIENT_PORT}")
 fi
 
 # ── Start container ───────────────────────────────────────────────────────────
@@ -176,11 +182,7 @@ echo ""
 success "TheFixClient container is running."
 echo -e "  ${BOLD}Container${RESET}    → ${CONTAINER_NAME}"
 echo -e "  ${BOLD}Network Mode${RESET} → ${NETWORK_MODE}"
-if [[ "${NETWORK_MODE}" != "host" ]]; then
-    echo -e "  ${BOLD}Web UI${RESET}       → http://localhost:${CLIENT_PORT}"
-else
-    echo -e "  ${BOLD}Web UI${RESET}       → http://localhost:8081  (host network)"
-fi
+echo -e "  ${BOLD}Web UI${RESET}       → http://localhost:${CLIENT_PORT}"
 echo -e "  ${BOLD}FIX Simulator${RESET} → ${FIX_HOST}:${FIX_PORT}"
 echo -e "  ${BOLD}Logs${RESET}          → ${LOG_DIR}"
 echo -e "  ${BOLD}Docker Logs${RESET}   → docker logs ${CONTAINER_NAME} -f"
