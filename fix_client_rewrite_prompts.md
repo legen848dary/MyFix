@@ -69,6 +69,13 @@ Apply the `application` plugin.
 
 Java toolchain: Java 21.
 
+Add a `repositories` block so dependency resolution works out of the box:
+```kotlin
+repositories {
+    mavenCentral()
+}
+```
+
 Dependencies (use exact versions):
 * `io.vertx:vertx-stack-depchain:5.0.8` (BOM/platform)
 * `io.vertx:vertx-core`
@@ -1337,7 +1344,7 @@ Create all operational scripts for direct-JVM and Docker deployment.
 
 Place all scripts in a `scripts/` directory at the project root.  All scripts must be `#!/usr/bin/env bash` with `set -euo pipefail`.
 
-**`scripts/common.sh`** — sourced by other scripts; set `MYFIX_HSBC_COMMON_SOURCED` guard to prevent double-sourcing
+**`scripts/common.sh`** — sourced by other scripts; set `HSBCFIXCLIENT_COMMON_SOURCED` guard to prevent double-sourcing
 
 Constants:
 ```
@@ -1397,7 +1404,7 @@ Behaviour:
 5. Check port availability; exit 1 if in use
 6. Call `ensure_runtime_dirs`
 7. Build: `./gradlew --no-daemon :installDist -x test` (unless `--no-build`)
-8. Launch: `nohup env JAVA_OPTS="-Xms<xms> -Xmx<xmx>" HSBC_CLIENT_PORT=<port> HSBC_FIX_HOST=<host> HSBC_FIX_PORT=<fixport> HSBC_FIX_LOG_DIR=<CLIENT_RUNTIME_DIR>/quickfixj HSBC_FIX_RAW_LOGGING_ENABLED=<raw> ./bin/HsbcFixClient > <CLIENT_LOG_FILE> 2>&1 &`
+8. Launch: `cd "${PROJECT_ROOT}/build/install/HsbcFixClient" && nohup env JAVA_OPTS="-Xms<xms> -Xmx<xmx>" HSBC_CLIENT_PORT=<port> HSBC_FIX_HOST=<host> HSBC_FIX_PORT=<fixport> HSBC_FIX_LOG_DIR=<CLIENT_RUNTIME_DIR>/quickfixj HSBC_FIX_RAW_LOGGING_ENABLED=<raw> ./bin/HsbcFixClient > <CLIENT_LOG_FILE> 2>&1 &`
    * Wrap with `taskset -c <CPU_PINNING>` if cpu pinning is set and `taskset` is available
    * Write PID to `CLIENT_PID_FILE`
 9. Call `wait_for_http "HsbcFixClient" "http://localhost:<port>/api/health" 90`
